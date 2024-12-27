@@ -37,13 +37,11 @@ This script was initially written to easily embed existing HueForge models on to
 ## Requirements
 - Python 3.x
 - trimesh
-- numpy
 - shapely
-- lib3mf
 
 ## Installation
 ```bash
-pip install trimesh numpy shapely lib3mf
+pip install trimesh shapely
 ```
 
 ## Usage
