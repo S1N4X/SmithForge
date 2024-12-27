@@ -34,7 +34,7 @@ def modify_3mf(hueforge_path, base_path, output_path,
     2) Compute scale so Hueforge fully occupies at least one dimension => scale = max(scale_x, scale_y).
     3) If scale < 1 and not --nominimum, clamp scale to 1.
     4) Center Hueforge on the base in (x, y).
-    5) Embed Hueforge in Z for real overlap (0.2 mm by default).
+    5) Embed Hueforge in Z for real overlap (0.1 mm by default).
     6) Apply user-specified shifts: --xshift, --yshift, --zshift
     7) Build a 2D convex hull from base's XY, extrude => 'cutter'.
     8) Intersect Hueforge with that cutter => clip outside base shape.
@@ -114,7 +114,7 @@ def modify_3mf(hueforge_path, base_path, output_path,
 
     # Align bottom of Hueforge to top of base
     hueforge.apply_translation([0, 0, base_top_z - hueforge_bottom_z])
-    overlap_amount = 0.2
+    overlap_amount = 0.1
     hueforge.apply_translation([0, 0, -overlap_amount])
     print(f"Embedding Hueforge by {overlap_amount} mm into base for overlap.")
 
