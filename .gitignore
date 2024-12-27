@@ -3,6 +3,9 @@
 Thumbs.db
 desktop.ini
 
+# Some image files for development
+*.webp
+
 # 3D Printing Files
 *.gcode
 *.stl.bak
