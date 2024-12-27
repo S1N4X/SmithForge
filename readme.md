@@ -24,10 +24,10 @@ This script was initially written to easily embed existing HueForge models on to
 9. Exports final unified model
 
 ## Notes
-Default overlap is 0.2mm for proper model union
-Scale maintains aspect ratio in X/Y dimensions
-Z-axis scaling is always preserved
-Models must have proper manifold geometry
+- Default overlap is 0.2mm for proper model union
+- Scale maintains aspect ratio in X/Y dimensions
+- Z-axis height is never modified (as per HueForge conventions)
+- Models must have proper manifold geometry
 
 ## Future Features
 - Automatically add height modifiers and filament colours from HueForge description fileW
@@ -51,17 +51,17 @@ python put_3mf_on_3mf.py -f hueforge.3mf -b base.3mf [options]
 
 ### Parameters
 Required:
--f, --hueforge: Path to Hueforge 3MF file to be placed on top
--b, --base: Path to base 3MF file
+- -f, --hueforge: Path to Hueforge 3MF file to be placed on top
+- -b, --base: Path to base 3MF file
 
 Optional:
--o, --output: Output file path (default: combined.3mf)
---rotatebase: Rotate base model (degrees, 0-360)
--s, --scale: Force specific scale value
---scaledown: Allow downscaling below 1.0
---xshift: X-axis shift in mm
---yshift: Y-axis shift in mm
---zshift: Z-axis shift in mm
+- -o, --output: Output file path (default: combined.3mf)
+- --rotatebase: Rotate base model (degrees, 0-360)
+- -s, --scale: Force specific scale value
+- --scaledown: Allow downscaling below 1.0
+- --xshift: X-axis shift in mm
+- --yshift: Y-axis shift in mm
+- --zshift: Z-axis shift in mm
 
 ### Examples
 Basic combination:
@@ -74,6 +74,7 @@ Rotate base and adjust position of HueForge (in mm):
 python put_3mf_on_3mf.py -f design.3mf -b base.3mf --rotatebase 90 --xshift 5 --zshift 0.5
 ```
 
+Force a user defined scale for the HueForge model (example: 1.5x size)
 ```bash
 python put_3mf_on_3mf.py -f design.3mf -b base.3mf -s 1.5
 ```
