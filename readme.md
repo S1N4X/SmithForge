@@ -7,13 +7,14 @@ A tool for combining two 3MF models by overlaying a Hueforge model onto a base s
 This script was initially written to easily embed existing HueForge models on top of ChromaLink hexagon bases. (TODO: Insert link)
 
 ## Features
-- Automatic scaling to match base dimensions while maintaining aspect ratio
-- Base model rotation support
-- Custom X/Y/Z positioning
+- Automatic scaling of X & Y axis to match the base dimensions while maintaining aspect ratio.
+- The Z-axis scaling remains unchanged throughout the process to avoid disrupting the Hueforge model's visual integrity.
+- Also maintains model integrity through convex hull clipping
 - Automatic centering
+- Custom X/Y/Z positioning
 - Proper model intersection and union
 - Smart Z-axis embedding with configurable overlap
-- Maintains model integrity through convex hull clipping
+- Base model rotation support
 
 ## Technical Process
 <p align="center">
