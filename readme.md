@@ -28,7 +28,7 @@ This script was initially written to easily embed existing HueForge models on to
 ## Notes
 - Default overlap is 0.2mm for proper model union
 - Scale maintains aspect ratio in X/Y dimensions
-- Z-axis height is never modified (as per HueForge conventions)
+- Z-axis height is never modified (as per HueForge guidelines)
 - Models must have proper manifold geometry
 
 ## Future Features
