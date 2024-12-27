@@ -4,9 +4,9 @@ Thumbs.db
 desktop.ini
 
 # Images
-!img/smithforge_logo_white_small_v2.gif
-!img/process.png
 img/*
+!img/process.png
+!img/smithforge_logo_white_small_v2.gif
 
 # 3D Printing Files
 *.gcode
