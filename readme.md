@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="img\forgesmith_logo_white_small_v2.gif" alt="ForgeSmith Logo">
+</p>
+
 # ForgeSmith
 Python script to combine two 3MF models by overlaying one (Hueforge) onto another (base) with automatic scaling, positioning, and proper model intersection.
 
