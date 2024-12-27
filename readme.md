@@ -35,7 +35,7 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 9. Exports final unified model
 
 ## Notes
-- Default overlap is 0.1mm for proper model union
+- Default overlap is 0.1mm for proper model union (can be changed with --zshift)
 - Scale maintains aspect ratio in X/Y dimensions
 - Z-axis height is never modified (as per HueForge guidelines)
 - Models must have proper manifold geometry
