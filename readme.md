@@ -2,9 +2,11 @@
   <img src="img\forgesmith_logo_white_small_v2.gif" alt="ForgeSmith Logo">
 </p>
 
-ForgeSmith is a tool for seamlessly combining two 3MF models by overlaying and embedding a Hueforge model onto a base shape with automatic scaling, positioning, and precise intersection alignment. The resulting 3MF file is ready to be opened in your favorite slicer for 3D printing.
+ForgeSmith is a tool for seamlessly combining two 3MF models by overlaying and embedding a Hueforge model onto a base shape with automatic scaling, positioning, and precise intersection alignment. The resulting 3MF file is ready to be opened in your favorite slicer for 3D printing. 
 
-Originally designed to simplify embedding Hueforge models onto ChromaLink hexagonal bases, this script ensures HueForge Z axis integrity (which means the script preserves Z height).
+This small but efficient script can be used to automate the process of shaping HueForges models to your needs. HueForge Z axis integrity is kept through the process (which means the script does not modify the original Z height config).
+
+This project was originally designed to simplify embedding Hueforge models onto ChromaLink (previously named MagHex) hexagonal bases. Please see the Slug3D.com ChromaLink framework for 3D printed wall art designs.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
