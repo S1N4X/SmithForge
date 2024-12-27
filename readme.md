@@ -1,5 +1,7 @@
 <p align="center">
   <img src="img\smithforge_logo_white_small_v2.gif" alt="smithforge Logo">
+
+# SmithForge
 </p>
 
 SmithForge is a tool for seamlessly combining two 3MF models by overlaying and embedding a Hueforge model onto a base shape with automatic scaling, positioning, and precise intersection alignment. All this using the great [trimesh](https://github.com/mikedh/trimesh) Python library. The resulting 3MF file would then be ready to be opened in your favourite slicer for 3D printing. 
