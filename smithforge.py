@@ -170,7 +170,7 @@ if __name__ == "__main__":
     # File paths
     parser.add_argument("-f", "--hueforge", required=True, help="Path to Hueforge 3MF file")
     parser.add_argument("-b", "--base", required=True, help="Path to base 3MF file")
-    parser.add_argument("-o", "--output" default="combined.3mf", help="Output 3MF file path")
+    parser.add_argument("-o", "--output", default="combined.3mf", help="Output 3MF file path")
 
     # Geometry
     parser.add_argument("--rotatebase", type=int, default=0,
