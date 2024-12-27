@@ -38,6 +38,8 @@ This script was initially written to easily embed existing HueForge models on to
 - Python 3.x
 - trimesh
 - shapely
+- A base model (.3mf)
+- A model to be embedded like a HueForge (.3mf)
 
 ## Installation
 ```bash
