@@ -82,15 +82,15 @@ python forgesmith.py -f hueforge.3mf -b base.3mf [options]
 ### Examples
 Basic combination:
 ```bash
-python forgesmith.py -f design.3mf -b base.3mf
+python forgesmith.py -f hueforge.3mf -b base.3mf
 ```
 
 Rotate base and adjust position of HueForge (in mm):
 ```bash
-python forgesmith.py -f design.3mf -b base.3mf --rotatebase 90 --xshift 5 --zshift 0.5
+python forgesmith.py -f hueforge.3mf -b base.3mf --rotatebase 90 --xshift 5 --zshift 0.5
 ```
 
 Force a user defined scale for the HueForge model (example: 1.5x size)
 ```bash
-python forgesmith.py -f design.3mf -b base.3mf -s 1.5
+python forgesmith.py -f hueforge.3mf -b base.3mf -s 1.5
 ```
