@@ -6,7 +6,7 @@ SmithForge is a tool for seamlessly combining two 3MF models by overlaying and e
 
 
 <p align="center">
-  <img src="img/process.png" alt="Process">
+  <img src="img/process2.png" alt="Process">
 </p>
 
 This small but efficient script can be used to automate the process of shaping HueForge models to your needs. HueForge Z axis integrity is kept through the process (which means the script does not modify the original Z height config).
