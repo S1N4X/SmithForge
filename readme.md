@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="img\forgesmith_logo_white_small_v2.gif" alt="ForgeSmith Logo">
+  <img src="img\smithforge_logo_white_small_v2.gif" alt="smithforge Logo">
 </p>
 
-ForgeSmith is a tool for seamlessly combining two 3MF models by overlaying and embedding a Hueforge model onto a base shape with automatic scaling, positioning, and precise intersection alignment. All this using the great [trimesh](https://github.com/mikedh/trimesh) Python library. The resulting 3MF file would then be ready to be opened in your favourite slicer for 3D printing. 
+SmithForge is a tool for seamlessly combining two 3MF models by overlaying and embedding a Hueforge model onto a base shape with automatic scaling, positioning, and precise intersection alignment. All this using the great [trimesh](https://github.com/mikedh/trimesh) Python library. The resulting 3MF file would then be ready to be opened in your favourite slicer for 3D printing. 
 
 
 <p align="center">
@@ -60,7 +60,7 @@ pip install trimesh shapely
 
 ## Usage
 ```bash
-python forgesmith.py -f hueforge.3mf -b base.3mf [options]
+python smithforge.py -f hueforge.3mf -b base.3mf [options]
 ```
 
 ### Parameters
@@ -88,15 +88,15 @@ python forgesmith.py -f hueforge.3mf -b base.3mf [options]
 ### Examples
 Basic combination:
 ```bash
-python forgesmith.py -f hueforge.3mf -b base.3mf
+python smithforge.py -f hueforge.3mf -b base.3mf
 ```
 
 Rotate base and adjust position of HueForge (in mm):
 ```bash
-python forgesmith.py -f hueforge.3mf -b base.3mf --rotatebase 90 --xshift 5 --zshift 0.5
+python smithforge.py -f hueforge.3mf -b base.3mf --rotatebase 90 --xshift 5 --zshift 0.5
 ```
 
 Force a user defined scale for the HueForge model (example: 1.5x size)
 ```bash
-python forgesmith.py -f hueforge.3mf -b base.3mf -s 1.5
+python smithforge.py -f hueforge.3mf -b base.3mf -s 1.5
 ```
