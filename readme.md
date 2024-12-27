@@ -5,6 +5,10 @@
 A tool for combining two 3MF models by overlaying a Hueforge model onto a base model with automatic scaling, positioning, and proper model intersection.
 This script was initially written to easily embed existing HueForge models on top of ChromaLink hexagon bases. (TODO: Insert link)
 
+<p align="center">
+  <img src="img/process.png" alt="Process">
+</p>
+
 ## Features
 - Automatic scaling to match base dimensions while maintaining aspect ratio
 - Base model rotation support
@@ -52,18 +56,26 @@ python put_3mf_on_3mf.py -f hueforge.3mf -b base.3mf [options]
 ```
 
 ### Parameters
-Required:
-- -f, --hueforge: Path to Hueforge 3MF file to be placed on top
-- -b, --base: Path to base 3MF file
+#### File paths
+```bash
+-f, --hueforge: Path to 3MF file as the overlay to be embedded (required)
+-b, --base: Path to base 3MF file (required)
+-o, --output: Output file path (default: combined.3mf)
+```
 
-Optional:
-- -o, --output: Output file path (default: combined.3mf)
-- --rotatebase: Rotate base model (degrees, 0-360)
-- -s, --scale: Force specific scale value
-- --scaledown: Allow downscaling below 1.0
-- --xshift: X-axis shift in mm
-- --yshift: Y-axis shift in mm
-- --zshift: Z-axis shift in mm
+#### Overlay geometry
+```bash
+--xshift: X-axis shift in mm
+--yshift: Y-axis shift in mm
+--zshift: Z-axis shift in mm
+-s, --scale: Force specific scale value
+--scaledown: Allow downscaling below 1.0
+```
+
+#### Base geometry
+```bash
+--rotatebase: Rotate base model (degrees, 0-360)
+```
 
 ### Examples
 Basic combination:

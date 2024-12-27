@@ -7,6 +7,7 @@ desktop.ini
 img/*
 img/forgesmith_logo_v2.gif
 !img/forgesmith_logo_white_small_v2.gif
+!img/process.png
 
 # 3D Printing Files
 *.gcode
