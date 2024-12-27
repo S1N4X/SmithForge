@@ -2,7 +2,8 @@
   <img src="img\forgesmith_logo_white_small_v2.gif" alt="ForgeSmith Logo">
 </p>
 
-A tool for combining two 3MF models by overlaying a Hueforge model onto a base model with automatic scaling, positioning, and proper model intersection.
+A tool for combining two 3MF models by overlaying a Hueforge model onto a base shape model with automatic scaling, positioning, and proper model intersection. The output 3MF file can then be opened with your favorite slicer to be sliced and be sent to a 3D printer! 
+
 This script was initially written to easily embed existing HueForge models on top of ChromaLink hexagon bases. (TODO: Insert link)
 
 <p align="center">
@@ -58,8 +59,8 @@ python put_3mf_on_3mf.py -f hueforge.3mf -b base.3mf [options]
 ### Parameters
 #### File paths
 ```bash
--f, --hueforge: Path to 3MF file as the overlay to be embedded (required)
--b, --base: Path to base 3MF file (required)
+-f, --hueforge: Path of the 3MF file that will serve as the overlay to be embedded to the base (required)
+-b, --base: Path of the base shape 3MF file (required)
 -o, --output: Output file path (default: combined.3mf)
 ```
 
