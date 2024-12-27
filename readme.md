@@ -2,9 +2,7 @@
   <img src="img\forgesmith_logo_white_small_v2.gif" alt="ForgeSmith Logo">
 </p>
 
-# ForgeSmith
-Python script to combine two 3MF models by overlaying one (Hueforge) onto another (base) with automatic scaling, positioning, and proper model intersection.
-
+A tool for combining two 3MF models by overlaying one (Hueforge) onto another (base) with automatic scaling, positioning, and proper model intersection.
 This script was initially written to easily embed existing HueForge models on top of ChromaLink hexagon bases. (TODO: Insert link)
 
 ## Features
