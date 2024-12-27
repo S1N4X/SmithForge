@@ -30,7 +30,7 @@ This script was initially written to easily embed existing HueForge models on to
 - Models must have proper manifold geometry
 
 ## Future Features
-- Automatically add height modifiers and filament colours from HueForge description fileW
+- Add height modifiers and filament colours from HueForge description files in the 3MF output
 
 ## Requirements
 - Python 3.x
