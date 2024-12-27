@@ -54,7 +54,7 @@ pip install trimesh shapely
 
 ## Usage
 ```bash
-python put_3mf_on_3mf.py -f hueforge.3mf -b base.3mf [options]
+python forgesmith.py -f hueforge.3mf -b base.3mf [options]
 ```
 
 ### Parameters
