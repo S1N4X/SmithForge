@@ -2,7 +2,7 @@
   <img src="img\forgesmith_logo_white_small_v2.gif" alt="ForgeSmith Logo">
 </p>
 
-ForgeSmith is a tool for seamlessly combining two 3MF models by overlaying and embedding a Hueforge model onto a base shape with automatic scaling, positioning, and precise intersection alignment. The resulting 3MF file is ready to be opened in your favorite slicer for 3D printing. 
+ForgeSmith is a tool for seamlessly combining two 3MF models by overlaying and embedding a Hueforge model onto a base shape with automatic scaling, positioning, and precise intersection alignment. The resulting 3MF file is ready to be opened in your favourite slicer for 3D printing. 
 
 
 <p align="center">
@@ -18,7 +18,7 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 
 ## Features
 - Automatic scaling of X & Y axis to match the base dimensions while maintaining aspect ratio.
-- The Z-axis scaling remains unchanged throughout the process to avoid disrupting the Hueforge model's visual integrity.
+- The Z-axis scaling remains unchanged throughout the process to avoid disrupting the Hueforge's visual integrity
 - Also maintains model integrity through convex hull clipping
 - Automatic centering
 - Custom X/Y/Z positioning
