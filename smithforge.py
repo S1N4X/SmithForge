@@ -18,6 +18,7 @@ from trimesh.exchange import load
 from trimesh import transformations as tf
 import shapely.geometry
 import argparse
+from shapely.geometry import Polygon, MultiPolygon
 
 def extract_main_mesh(scene):
     if isinstance(scene, trimesh.Scene):
@@ -33,6 +34,13 @@ def ensure_watertight(mesh):
         mesh.fill_holes()
         if not mesh.is_watertight:
             raise ValueError("Mesh could not be made watertight.")
+
+def extrude_multipolygon(multipolygon, height):
+    extruded_meshes = []
+    for polygon in multipolygon:
+        extruded_mesh = trimesh.creation.extrude_polygon(polygon, height=height)
+        extruded_meshes.append(extruded_mesh)
+    return trimesh.util.concatenate(extruded_meshes)
 
 def modify_3mf(hueforge_path, base_path, output_path,
                scaledown, rotate_base,
@@ -176,35 +184,86 @@ def modify_3mf(hueforge_path, base_path, output_path,
             print("No leftover area => nothing to fill.")
             patch_3d = None
         else:
+            # Check if leftover_2d is a MultiPolygon
+            if leftover_2d.geom_type == 'MultiPolygon':
+                # Collect all individual Polygons
+                polygons = list(leftover_2d.geoms)
+            elif leftover_2d.geom_type == 'Polygon':
+                polygons = [leftover_2d]
+            else:
+                print("Unexpected geometry type for leftover_2d.")
+                patch_3d = None
+                return  # Exit function if unexpected geometry type
+
+            # Extrude each valid Polygon and union them
+            patch_meshes = []
             leftover_thickness = fill if fill else 1.0  # default 1mm if no --fill
             print(f"Extruding leftover patch by {leftover_thickness} mm.")
-            patch_3d = trimesh.creation.extrude_polygon(leftover_2d, height=leftover_thickness)
+            for poly in polygons:
+                if not poly.is_valid or poly.area <= 1e-6:
+                    print("Skipping invalid or zero-area polygon.")
+                    continue
+                patch = trimesh.creation.extrude_polygon(poly, height=leftover_thickness)
+                # Simplify translation
+                patch.apply_translation([0, 0, base_top_z - overlap_amount])
+                patch_meshes.append(patch)
 
-            # Place the patch at the top of the base
-            patch_3d.apply_translation([0, 0, base_top_z])
+            if patch_meshes:
+                # Union all patch meshes into one
+                combined_patch = trimesh.boolean.union(patch_meshes)
+                patch_3d = combined_patch
+            else:
+                patch_3d = None
+    else:
+        patch_3d = None
 
+    # Ensure meshes are watertight
+    print("Base is watertight:", base.is_watertight)
+    print("Base volume:", base.volume)
+
+    if patch_3d:
+        print("Patch is watertight:", patch_3d.is_watertight)
+        print("Patch volume:", patch_3d.volume)
+
+    if not base.is_watertight:
+        trimesh.repair.fix_mesh(base)
+        if not base.is_watertight:
+            raise ValueError("Base mesh is not watertight.")
+
+    if patch_3d:
+        if not patch_3d.is_watertight:
+            trimesh.repair.fix_mesh(patch_3d)
+            if not patch_3d.is_watertight:
+                raise ValueError("Patch mesh is not watertight.")
+
+    if not hueforge_clipped.is_watertight:
+        trimesh.repair.fix_mesh(hueforge_clipped)
+        if not hueforge_clipped.is_watertight:
+            raise ValueError("Hueforge clipped mesh is not watertight.")
+        
     # ----------------------
     # STEP 9) Union clipped Hueforge + base => final mesh
     # ----------------------
     print("Union clipped Hueforge + base => final mesh...")
     if patch_3d:
-        # First union base + leftover patch => then union with Hueforge
         base_plus_patch = base.union(patch_3d)
-        final_mesh = base_plus_patch.union(hueforge_clipped)
     else:
-        # Nothing leftover to fill
-        final_mesh = base.union(hueforge_clipped)
+        base_plus_patch = base
+
+    # Export intermediate meshes for debugging
+    if patch_3d:
+        patch_3d.export('patch_3d.stl')
+    base.export('base.stl')
+    hueforge_clipped.export('hueforge_clipped.stl')
+    base_plus_patch.export('base_plus_patch.stl')
+
+
+    final_mesh = base_plus_patch.union(hueforge_clipped)
 
     # ----------------------
-    # STEP 10) Ensure final mesh is watertight (optional)
+    # STEP 10 Export
     # ----------------------
-    if watertight:
-        print("Ensuring final mesh is watertight...")
-        ensure_watertight(final_mesh)
-
-    # ----------------------
-    # STEP 11) Export
-    # ----------------------
+    # Export final mesh
     print(f"Exporting final mesh to {output_path}")
     final_mesh.export(output_path)
     print("✅ Done! Rotation, user shift, scaling, centering, leftover patch, clipping, embedding, union, and watertight check complete.")
