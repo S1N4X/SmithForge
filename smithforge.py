@@ -41,14 +41,15 @@ def modify_3mf(hueforge_path, base_path, output_path,
     """
     1) Rotate the base around Z by --rotatebase degrees (if nonzero).
     2) Compute scale so Hueforge fully occupies at least one dimension => scale = max(scale_x, scale_y).
-    3) If scale < 1 and not --nominimum, clamp scale to 1.
+    3) If scale < 1 and not --scaledown, clamp scale to 1.
     4) Center Hueforge on the base in (x, y).
     5) Embed Hueforge in Z for real overlap (0.1 mm by default).
     6) Apply user-specified shifts: --xshift, --yshift, --zshift
     7) Build a 2D convex hull from base's XY, extrude => 'cutter'.
     8) Intersect Hueforge with that cutter => clip outside base shape.
-    9) Union clipped Hueforge + base => single manifold => export.
-    10) Optionally ensure the final mesh is watertight.
+    9) [NEW STEP] Compute leftover patch from base - Hueforge, extrude, and union.
+    10) Union clipped Hueforge + base => single manifold => export.
+    11) Optionally ensure the final mesh is watertight.
     """
 
     print(f"Loading Hueforge: {hueforge_path}")
@@ -156,56 +157,43 @@ def modify_3mf(hueforge_path, base_path, output_path,
         print("❌ Intersection is empty. Possibly no overlap or base not a volume.")
         return
 
-    # ----------------------
-    # STEP 8) (Optional) Fill the out-of-bounds region
-    # ----------------------
-    if fill is not None:
-        # Compute 2D hulls for base & hueforge
-        hueforge_verts_2d = [(v[0], v[1]) for v in hueforge_clipped.vertices]
-        hueforge_2d_hull   = shapely.geometry.MultiPoint(hueforge_verts_2d).convex_hull
+    # ======================================================
+    # STEP 8) Create leftover patch to fill uncovered region
+    # ------------------------------------------------------
+    # We'll do a 2D difference: base_2d - hueforge_2d
+    # then extrude that shape in Z so it's flush with base's top surface.
+    # If nothing is leftover, we skip it.
+    if fill:
+        print("Computing leftover patch (base minus Hueforge in XY)...")
+        base_pts_2d = [(v[0], v[1]) for v in base.vertices]
+        hue_pts_2d  = [(v[0], v[1]) for v in hueforge.vertices]
 
-        # Region where base extends beyond hueforge (2D difference)
-        missing_region_2d = hull_2d.difference(hueforge_2d_hull)
-        missing_region_2d = missing_region_2d.buffer(0.01) # Else, it will not be watertight
+        base_2d_poly = shapely.geometry.MultiPoint(base_pts_2d).convex_hull
+        hue_2d_poly  = shapely.geometry.MultiPoint(hue_pts_2d).convex_hull
 
-        if not missing_region_2d.is_empty:
-            # Example fill thickness: match base thickness
-            fill_height = base_max[2] - base_min[2]
+        leftover_2d = base_2d_poly.difference(hue_2d_poly)
+        if leftover_2d.is_empty:
+            print("No leftover area => nothing to fill.")
+            patch_3d = None
+        else:
+            leftover_thickness = fill if fill else 1.0  # default 1mm if no --fill
+            print(f"Extruding leftover patch by {leftover_thickness} mm.")
+            patch_3d = trimesh.creation.extrude_polygon(leftover_2d, height=leftover_thickness)
 
-            print(f"Filling region with mode '{fill}' => extruding missing 2D area, height={fill_height:.2f}")
-            
-            # Handle MultiPolygon case
-            if isinstance(missing_region_2d, shapely.geometry.MultiPolygon):
-                missing_extruded = trimesh.util.concatenate([
-                    trimesh.creation.extrude_polygon(polygon, height=fill_height)
-                    for polygon in missing_region_2d.geoms
-                ])
-            else:
-                missing_extruded = trimesh.creation.extrude_polygon(missing_region_2d, height=fill_height)
-
-            # Translate so it aligns with base's bottom
-            fill_z_translation = base_min[2] - missing_extruded.bounds[0][2]
-            missing_extruded.apply_translation([0, 0, fill_z_translation])
-
-            # To do: remove
-            # Ensure the fill mesh is watertight
-            #combined_fill = hueforge_clipped.union(missing_extruded)
-            #ensure_watertight(combined_fill)
-
-            if fill == "overlay-extrude":
-                print("Union fill geometry with Hueforge (extend Hueforge outward).")
-                hueforge_clipped = hueforge_clipped.union(missing_extruded)
-            elif fill == "base-extrude":
-                print("Union fill geometry with Base (extend Base to fill gap).")
-                base = base.union(missing_extruded)
-            else:
-                print("Unknown fill mode ignored.")
+            # Place the patch at the top of the base
+            patch_3d.apply_translation([0, 0, base_top_z])
 
     # ----------------------
-    # STEP 9) Union => single manifold
+    # STEP 9) Union clipped Hueforge + base => final mesh
     # ----------------------
     print("Union clipped Hueforge + base => final mesh...")
-    final_mesh = base.union(hueforge_clipped)
+    if patch_3d:
+        # First union base + leftover patch => then union with Hueforge
+        base_plus_patch = base.union(patch_3d)
+        final_mesh = base_plus_patch.union(hueforge_clipped)
+    else:
+        # Nothing leftover to fill
+        final_mesh = base.union(hueforge_clipped)
 
     # ----------------------
     # STEP 10) Ensure final mesh is watertight (optional)
@@ -219,14 +207,15 @@ def modify_3mf(hueforge_path, base_path, output_path,
     # ----------------------
     print(f"Exporting final mesh to {output_path}")
     final_mesh.export(output_path)
-    print("✅ Done! Rotation, user shift, scaling, centering, clipping, embedding, union, and watertight check complete.")
+    print("✅ Done! Rotation, user shift, scaling, centering, leftover patch, clipping, embedding, union, and watertight check complete.")
+
 
 # ----------------------
 # MAIN
 # ----------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Combine two 3MF models by overlaying one (Hueforge) onto another (base) with automatic scaling, positioning, and proper model intersection. Optionally rotate base, scale & center Hueforge, allow user shifts, clip to base shape, union, and ensure watertightness."
+        description="Combine two 3MF models by overlaying one (Hueforge) onto another (base) with automatic scaling, positioning, leftover patch fill, etc."
     )
 
     # File paths
@@ -242,25 +231,18 @@ if __name__ == "__main__":
                         help="Force a specific scale value instead of auto-computing. Examples: 0.5 (scale down by half), 1.0 (no scaling), 2.0 (double size)")
 
     parser.add_argument("--scaledown", action="store_true",
-                        help="If set, allow scale < 1.0. Otherwise, clamp scale to 1.0 if computed scale < 1.0. Only used if --scale is not set.")
-    
+                        help="If set, allow scale < 1.0. Otherwise, clamp scale to 1.0 if computed scale < 1.0.")
+
     parser.add_argument("-x","--xshift", type=float, default=0.0, help="Shift hueforge in X before embedding it on the base (mm)")
     parser.add_argument("-y","--yshift", type=float, default=0.0, help="Shift hueforge in Y before embedding it on the base (mm)")
     parser.add_argument("-z","--zshift", type=float, default=0.0, help="Shift hueforge in Z before embedding it on the base (mm)")
 
-    parser.add_argument(
-        "--fill",
-        choices=["overlay-extrude", "base-extrude"],
-        default=None,
-        help=(
-            "Optionally fill the out-of-bounds region when shifting Hueforge. "
-            "'overlay-extrude': extend Hueforge outward to cover the gap. "
-            "'base-extrude': extend the base geometry into the gap."
-        ),
-    )
-
     parser.add_argument("--watertight", action="store_true",
                         help="Ensure the final mesh is watertight by filling holes.")
+
+    # [NEW] Optional leftover patch thickness if user wants finer or thicker fill
+    parser.add_argument("--fill", type=float,
+                        help="Thickness (in mm) for leftover patch. If omitted, defaults to 1.0 mm.")
 
     args = parser.parse_args()
     modify_3mf(
