@@ -241,6 +241,7 @@ if __name__ == "__main__":
                         help="Ensure the final mesh is watertight by filling holes.")
 
     # [NEW] Optional leftover patch thickness if user wants finer or thicker fill
+    # NOT WORKING: Maybe try and embedding 0.1 for the patch
     parser.add_argument("--fill", type=float,
                         help="Thickness (in mm) for leftover patch. If omitted, defaults to 1.0 mm.")
 
