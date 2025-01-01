@@ -257,7 +257,6 @@ def modify_3mf(hueforge_path, base_path, output_path,
     hueforge_clipped.export('hueforge_clipped.stl')
     base_plus_patch.export('base_plus_patch.stl')
 
-
     final_mesh = base_plus_patch.union(hueforge_clipped)
 
     # ----------------------
