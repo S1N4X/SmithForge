@@ -28,7 +28,7 @@ def extract_main_mesh(scene):
 def modify_3mf(hueforge_path, base_path, output_path,
                scaledown, rotate_base,
                xshift, yshift, zshift,
-               force_scale=None):
+               force_scale=None, fill=None):
     """
     1) Rotate the base around Z by --rotatebase degrees (if nonzero).
     2) Compute scale so Hueforge fully occupies at least one dimension => scale = max(scale_x, scale_y).
@@ -147,13 +147,44 @@ def modify_3mf(hueforge_path, base_path, output_path,
         return
 
     # ----------------------
-    # STEP 8) Union => single manifold
+    # STEP 8) (Optional) Fill the out-of-bounds region
+    # ----------------------
+    if fill is not None:
+        # Compute 2D hulls for base & hueforge
+        hueforge_verts_2d = [(v[0], v[1]) for v in hueforge_clipped.vertices]
+        hueforge_2d_hull   = shapely.geometry.MultiPoint(hueforge_verts_2d).convex_hull
+
+        # Region where base extends beyond hueforge (2D difference)
+        missing_region_2d = hull_2d.difference(hueforge_2d_hull)
+
+        if not missing_region_2d.is_empty:
+            # Example fill thickness: match base thickness
+            fill_height = base_max[2] - base_min[2]
+
+            print(f"Filling region with mode '{fill}' => extruding missing 2D area, height={fill_height:.2f}")
+            missing_extruded = trimesh.creation.extrude_polygon(missing_region_2d, height=fill_height)
+
+            # Translate so it aligns with base's bottom
+            fill_z_translation = base_min[2] - missing_extruded.bounds[0][2]
+            missing_extruded.apply_translation([0, 0, fill_z_translation])
+
+            if fill == "overlay-extrude":
+                print("Union fill geometry with Hueforge (extend Hueforge outward).")
+                hueforge_clipped = hueforge_clipped.union(missing_extruded)
+            elif fill == "base-extrude":
+                print("Union fill geometry with Base (extend Base to fill gap).")
+                base = base.union(missing_extruded)
+            else:
+                print("Unknown fill mode ignored.")
+
+    # ----------------------
+    # STEP 9) Union => single manifold
     # ----------------------
     print("Union clipped Hueforge + base => final mesh...")
     final_mesh = base.union(hueforge_clipped)
 
     # ----------------------
-    # STEP 9) Export
+    # STEP 10) Export
     # ----------------------
     print(f"Exporting final mesh to {output_path}")
     final_mesh.export(output_path)
@@ -182,9 +213,20 @@ if __name__ == "__main__":
     parser.add_argument("--scaledown", action="store_true",
                         help="If set, allow scale < 1.0. Otherwise, clamp scale to 1.0 if computed scale < 1.0. Only used if --scale is not set.")
     
-    parser.add_argument("--xshift", type=float, default=0.0, help="Shift hueforge in X before embedding it on the base (mm)")
-    parser.add_argument("--yshift", type=float, default=0.0, help="Shift hueforge in Y before embedding it on the base (mm)")
-    parser.add_argument("--zshift", type=float, default=0.0, help="Shift hueforge in Z before embedding it on the base (mm)")
+    parser.add_argument("-x","--xshift", type=float, default=0.0, help="Shift hueforge in X before embedding it on the base (mm)")
+    parser.add_argument("-y","--yshift", type=float, default=0.0, help="Shift hueforge in Y before embedding it on the base (mm)")
+    parser.add_argument("-z","--zshift", type=float, default=0.0, help="Shift hueforge in Z before embedding it on the base (mm)")
+
+    parser.add_argument(
+        "--fill",
+        choices=["overlay-extrude", "base-extrude"],
+        default=None,
+        help=(
+            "Optionally fill the out-of-bounds region when shifting Hueforge. "
+            "'overlay-extrude': extend Hueforge outward to cover the gap. "
+            "'base-extrude': extend the base geometry into the gap."
+        ),
+    )
 
     args = parser.parse_args()
     modify_3mf(
@@ -196,5 +238,6 @@ if __name__ == "__main__":
         xshift=args.xshift,
         yshift=args.yshift,
         zshift=args.zshift,
-        force_scale=args.scale
+        force_scale=args.scale,
+        fill=args.fill
     )
