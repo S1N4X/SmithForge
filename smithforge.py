@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 #⠀⠀⠀⠀⠀⠀⢰⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⡄⠀⠀⠀⠀⠀
 #⠀⠹⣿⣿⣿⣿⡇⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡇⢠⣄⡀⠀⠀
 #⠀⠀⠙⢿⣿⣿⡇⢸⣿⣿⣿ SMITHFORGE ⣿⣿⣿⣿⢸⣿⣿⡶⠀
@@ -25,10 +27,17 @@ def extract_main_mesh(scene):
     else:
         raise ValueError("Unsupported 3MF content.")
 
+def ensure_watertight(mesh):
+    if not mesh.is_watertight:
+        print("Mesh is not watertight. Attempting to fix...")
+        mesh.fill_holes()
+        if not mesh.is_watertight:
+            raise ValueError("Mesh could not be made watertight.")
+
 def modify_3mf(hueforge_path, base_path, output_path,
                scaledown, rotate_base,
                xshift, yshift, zshift,
-               force_scale=None, fill=None):
+               force_scale=None, fill=None, watertight=False):
     """
     1) Rotate the base around Z by --rotatebase degrees (if nonzero).
     2) Compute scale so Hueforge fully occupies at least one dimension => scale = max(scale_x, scale_y).
@@ -39,6 +48,7 @@ def modify_3mf(hueforge_path, base_path, output_path,
     7) Build a 2D convex hull from base's XY, extrude => 'cutter'.
     8) Intersect Hueforge with that cutter => clip outside base shape.
     9) Union clipped Hueforge + base => single manifold => export.
+    10) Optionally ensure the final mesh is watertight.
     """
 
     print(f"Loading Hueforge: {hueforge_path}")
@@ -156,17 +166,31 @@ def modify_3mf(hueforge_path, base_path, output_path,
 
         # Region where base extends beyond hueforge (2D difference)
         missing_region_2d = hull_2d.difference(hueforge_2d_hull)
+        missing_region_2d = missing_region_2d.buffer(0.01) # Else, it will not be watertight
 
         if not missing_region_2d.is_empty:
             # Example fill thickness: match base thickness
             fill_height = base_max[2] - base_min[2]
 
             print(f"Filling region with mode '{fill}' => extruding missing 2D area, height={fill_height:.2f}")
-            missing_extruded = trimesh.creation.extrude_polygon(missing_region_2d, height=fill_height)
+            
+            # Handle MultiPolygon case
+            if isinstance(missing_region_2d, shapely.geometry.MultiPolygon):
+                missing_extruded = trimesh.util.concatenate([
+                    trimesh.creation.extrude_polygon(polygon, height=fill_height)
+                    for polygon in missing_region_2d.geoms
+                ])
+            else:
+                missing_extruded = trimesh.creation.extrude_polygon(missing_region_2d, height=fill_height)
 
             # Translate so it aligns with base's bottom
             fill_z_translation = base_min[2] - missing_extruded.bounds[0][2]
             missing_extruded.apply_translation([0, 0, fill_z_translation])
+
+            # To do: remove
+            # Ensure the fill mesh is watertight
+            #combined_fill = hueforge_clipped.union(missing_extruded)
+            #ensure_watertight(combined_fill)
 
             if fill == "overlay-extrude":
                 print("Union fill geometry with Hueforge (extend Hueforge outward).")
@@ -184,18 +208,25 @@ def modify_3mf(hueforge_path, base_path, output_path,
     final_mesh = base.union(hueforge_clipped)
 
     # ----------------------
-    # STEP 10) Export
+    # STEP 10) Ensure final mesh is watertight (optional)
+    # ----------------------
+    if watertight:
+        print("Ensuring final mesh is watertight...")
+        ensure_watertight(final_mesh)
+
+    # ----------------------
+    # STEP 11) Export
     # ----------------------
     print(f"Exporting final mesh to {output_path}")
     final_mesh.export(output_path)
-    print("✅ Done! Rotation, user shift, scaling, centering, clipping, embedding, and union complete.")
+    print("✅ Done! Rotation, user shift, scaling, centering, clipping, embedding, union, and watertight check complete.")
 
 # ----------------------
 # MAIN
 # ----------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Combine two 3MF models by overlaying one (Hueforge) onto another (base) with automatic scaling, positioning, and proper model intersection. Optionally rotate base, scale & center Hueforge, allow user shifts, clip to base shape, union."
+        description="Combine two 3MF models by overlaying one (Hueforge) onto another (base) with automatic scaling, positioning, and proper model intersection. Optionally rotate base, scale & center Hueforge, allow user shifts, clip to base shape, union, and ensure watertightness."
     )
 
     # File paths
@@ -228,6 +259,9 @@ if __name__ == "__main__":
         ),
     )
 
+    parser.add_argument("--watertight", action="store_true",
+                        help="Ensure the final mesh is watertight by filling holes.")
+
     args = parser.parse_args()
     modify_3mf(
         hueforge_path=args.hueforge,
@@ -239,5 +273,6 @@ if __name__ == "__main__":
         yshift=args.yshift,
         zshift=args.zshift,
         force_scale=args.scale,
-        fill=args.fill
+        fill=args.fill,
+        watertight=args.watertight
     )

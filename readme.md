@@ -27,6 +27,7 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 - Smart Z-axis embedding with configurable overlap
 - Base model rotation support
 - Optional fill for out-of-bounds regions
+- Optional watertight check for the final mesh
 
 ## Technical Process
 1. Loads both 3MF models
@@ -38,7 +39,8 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 7. Creates convex hull of base for proper intersection
 8. Performs boolean operations for clean combination
 9. Optionally fills out-of-bounds regions
-10. Exports final unified model
+10. Optionally ensures the final mesh is watertight
+11. Exports final unified model
 
 ## Notes
 - Default overlap is 0.1mm for proper model union (can be changed with --zshift)
@@ -93,6 +95,11 @@ python smithforge.py -f hueforge.3mf -b base.3mf [options]
 --fill: Optionally fill the out-of-bounds region. Choices: "overlay-extrude", "base-extrude"
 ```
 
+#### Watertight option
+```bash
+--watertight: Ensure the final mesh is watertight by filling holes
+```
+
 ### Examples
 Basic combination:
 ```bash
@@ -112,4 +119,9 @@ python smithforge.py -f hueforge.3mf -b base.3mf -s 1.5
 Fill the out-of-bounds region with overlay extrusion:
 ```bash
 python smithforge.py -f hueforge.3mf -b base.3mf --fill overlay-extrude
+```
+
+Ensure the final mesh is watertight:
+```bash
+python smithforge.py -f hueforge.3mf -b base.3mf --watertight
 ```
