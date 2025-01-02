@@ -11,6 +11,18 @@
 #
 # GPL-3.0-only License
 
+# TODO: Handle the error when meshes are not volumes.
+# Sometimes, the process fails with the error "Not all meshes are volumes".
+# This can occur due to specific x or y placements being incompatible.
+# To resolve this, retry the process with a 0.01 mm adjustment in the x or y placement.
+# Steps:
+# 1. Catch the error when it occurs.
+# 2. Adjust the x or y placement by 0.01 mm.
+# 3. Retry the process with the new placement.
+# 4. Repeat until the process succeeds or a maximum number of retries is reached.
+# 5. If the process fails after the maximum number of retries, return an error message. (Max retries set by user with --max-retries)
+# 6. If the process succeeds, return the output file and log as usual.
+
 import trimesh
 from trimesh.exchange import load
 from trimesh import transformations as tf
