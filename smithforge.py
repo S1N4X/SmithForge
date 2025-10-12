@@ -36,8 +36,9 @@ def extract_color_layers(hueforge_3mf_path):
     Extract color layer information from a Hueforge 3MF file.
 
     Returns:
-        dict with 'layers' (list of dicts with top_z, extruder, color)
-        and 'filament_colours' (list of hex color strings), or None if no color data found.
+        dict with 'layers' (list of dicts with top_z, extruder, color),
+        'filament_colours' (list of hex color strings), and optionally
+        'layer_config_ranges_xml' (raw XML string), or None if no color data found.
     """
     try:
         with zipfile.ZipFile(hueforge_3mf_path, 'r') as zf:
@@ -75,12 +76,24 @@ def extract_color_layers(hueforge_3mf_path):
             except (KeyError, json.JSONDecodeError) as e:
                 print(f"ℹ️  Could not extract filament colors: {e}")
 
+            # Extract layer_config_ranges.xml if it exists
+            layer_config_ranges_xml = None
+            try:
+                with zf.open('Metadata/layer_config_ranges.xml') as f:
+                    layer_config_ranges_xml = f.read().decode('utf-8')
+                    print("✅ Extracted layer_config_ranges.xml")
+            except KeyError:
+                print("ℹ️  No layer_config_ranges.xml found in Hueforge 3MF")
+
             if layers:
                 print(f"✅ Extracted {len(layers)} color layer transitions")
-                return {
+                result = {
                     'layers': layers,
                     'filament_colours': filament_colours
                 }
+                if layer_config_ranges_xml:
+                    result['layer_config_ranges_xml'] = layer_config_ranges_xml
+                return result
             else:
                 return None
 
@@ -202,6 +215,34 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
             model_settings_tree.write(model_settings_path, encoding='UTF-8', xml_declaration=True)
 
             print("✅ Added Bambu Lab identification metadata for compatibility")
+
+            # Copy layer_config_ranges.xml if it exists and adjust Z values
+            if 'layer_config_ranges_xml' in color_data:
+                try:
+                    # Parse the XML
+                    ranges_root = ET.fromstring(color_data['layer_config_ranges_xml'])
+
+                    # Adjust all min_z and max_z values
+                    for range_elem in ranges_root.findall('.//range'):
+                        min_z = range_elem.get('min_z')
+                        max_z = range_elem.get('max_z')
+
+                        if min_z:
+                            adjusted_min = float(min_z) + z_offset
+                            range_elem.set('min_z', str(adjusted_min))
+
+                        if max_z:
+                            adjusted_max = float(max_z) + z_offset
+                            range_elem.set('max_z', str(adjusted_max))
+
+                    # Write the adjusted XML
+                    ranges_tree = ET.ElementTree(ranges_root)
+                    ET.indent(ranges_tree, space=' ')
+                    ranges_path = os.path.join(metadata_dir, 'layer_config_ranges.xml')
+                    ranges_tree.write(ranges_path, encoding='utf-8', xml_declaration=True)
+                    print("✅ Added layer_config_ranges.xml with adjusted Z values")
+                except Exception as e:
+                    print(f"⚠️  Could not process layer_config_ranges.xml: {e}")
 
             # Repack the 3MF
             temp_output = output_3mf_path + '.tmp'
