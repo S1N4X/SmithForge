@@ -150,6 +150,59 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
             with open(project_settings_path, 'w') as f:
                 json.dump(config, f, indent=4)
 
+            # Create Bambu Lab identification files to prevent "not from Bambu Lab" warning
+            # This ensures Bambu Studio recognizes the file and preserves color metadata
+
+            # Create slice_info.config with Bambu Lab identifiers
+            slice_info_xml = ET.Element('config')
+            header = ET.SubElement(slice_info_xml, 'header')
+            ET.SubElement(header, 'header_item', key='X-BBL-Client-Type', value='slicer')
+            ET.SubElement(header, 'header_item', key='X-BBL-Client-Version', value='02.00.03.54')
+
+            slice_info_tree = ET.ElementTree(slice_info_xml)
+            ET.indent(slice_info_tree, space='  ')
+            slice_info_path = os.path.join(metadata_dir, 'slice_info.config')
+            slice_info_tree.write(slice_info_path, encoding='UTF-8', xml_declaration=True)
+
+            # Create minimal model_settings.config for Bambu Studio compatibility
+            model_settings_xml = ET.Element('config')
+            obj = ET.SubElement(model_settings_xml, 'object', id='1')
+            ET.SubElement(obj, 'metadata', key='name', value='SmithForge Combined Model')
+            ET.SubElement(obj, 'metadata', key='extruder', value='1')
+
+            part = ET.SubElement(obj, 'part', id='1', subtype='normal_part')
+            ET.SubElement(part, 'metadata', key='name', value='Combined')
+            ET.SubElement(part, 'metadata', key='matrix', value='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1')
+
+            plate_elem = ET.SubElement(model_settings_xml, 'plate')
+            ET.SubElement(plate_elem, 'metadata', key='plater_id', value='1')
+            ET.SubElement(plate_elem, 'metadata', key='plater_name', value='')
+            ET.SubElement(plate_elem, 'metadata', key='locked', value='false')
+
+            # Set up filament mapping based on number of colors
+            num_filaments = len(color_data.get('filament_colours', []))
+            if num_filaments > 0:
+                filament_maps = ' '.join([str(i) for i in range(1, num_filaments + 1)])
+                ET.SubElement(plate_elem, 'metadata', key='filament_maps', value=filament_maps)
+
+            model_instance = ET.SubElement(plate_elem, 'model_instance')
+            ET.SubElement(model_instance, 'metadata', key='object_id', value='1')
+            ET.SubElement(model_instance, 'metadata', key='instance_id', value='0')
+
+            assemble = ET.SubElement(model_settings_xml, 'assemble')
+            ET.SubElement(assemble, 'assemble_item',
+                         object_id='1',
+                         instance_id='0',
+                         transform='1 0 0 0 1 0 0 0 1 0 0 0',
+                         offset='0 0 0')
+
+            model_settings_tree = ET.ElementTree(model_settings_xml)
+            ET.indent(model_settings_tree, space='  ')
+            model_settings_path = os.path.join(metadata_dir, 'model_settings.config')
+            model_settings_tree.write(model_settings_path, encoding='UTF-8', xml_declaration=True)
+
+            print("✅ Added Bambu Lab identification metadata for compatibility")
+
             # Repack the 3MF
             temp_output = output_3mf_path + '.tmp'
             with zipfile.ZipFile(temp_output, 'w', zipfile.ZIP_DEFLATED) as zf_out:
