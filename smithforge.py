@@ -23,6 +23,18 @@ import os
 import tempfile
 import shutil
 
+# Import repair module
+try:
+    from repair import auto_repair_mesh, RepairReport
+except ImportError:
+    # If running from parent directory
+    try:
+        from smithforge.repair import auto_repair_mesh, RepairReport
+    except ImportError:
+        print("⚠️  Warning: Could not import repair module. Auto-repair will be disabled.")
+        auto_repair_mesh = None
+        RepairReport = None
+
 # Configuration constants
 DEFAULT_EMBEDDING_OVERLAP_MM = 0.1  # Default Z-axis overlap for proper model union
 
@@ -267,7 +279,8 @@ def modify_3mf(hueforge_path, base_path, output_path,
                scaledown, rotate_base,
                xshift, yshift, zshift,
                force_scale=None,
-               preserve_colors=False):
+               preserve_colors=False,
+               auto_repair=False):
     """
     1) Rotate the base around Z by --rotatebase degrees (if nonzero).
     2) Compute scale so Hueforge fully occupies at least one dimension => scale = max(scale_x, scale_y).
@@ -279,6 +292,7 @@ def modify_3mf(hueforge_path, base_path, output_path,
     8) Intersect Hueforge with that cutter => clip outside base shape.
     9) Union clipped Hueforge + base => single manifold => export.
     10) If preserve_colors=True, extract color layers from Hueforge and inject into output with adjusted Z heights.
+    11) If auto_repair=True, automatically validate and repair mesh issues before processing.
     """
 
     # Extract color layer information if requested
@@ -296,6 +310,25 @@ def modify_3mf(hueforge_path, base_path, output_path,
     print(f"Loading base: {base_path}")
     base_scene = load.load(base_path)
     base = extract_main_mesh(base_scene)
+
+    # Auto-repair meshes if requested
+    if auto_repair and auto_repair_mesh is not None:
+        print("\n🔧 === MESH REPAIR MODE ENABLED ===")
+
+        print("\n🔍 Checking Hueforge mesh...")
+        hueforge, hueforge_report = auto_repair_mesh(hueforge)
+        print(hueforge_report)
+
+        print("\n🔍 Checking base mesh...")
+        base, base_report = auto_repair_mesh(base)
+        print(base_report)
+
+        print("🔧 === MESH REPAIR COMPLETE ===\n")
+
+        if not hueforge_report.success or not base_report.success:
+            print("⚠️  Warning: Some mesh repairs were not fully successful. Boolean operations may still fail.")
+    elif auto_repair and auto_repair_mesh is None:
+        print("⚠️  Auto-repair requested but repair module not available. Skipping repair.")
 
     # ----------------------
     # STEP 1) Rotate the base if requested
@@ -452,6 +485,10 @@ if __name__ == "__main__":
     parser.add_argument("--preserve-colors", action="store_true",
                         help="Preserve Hueforge color layer information in the output 3MF file (adjusts Z-heights for new position)")
 
+    # Mesh repair
+    parser.add_argument("--auto-repair", action="store_true",
+                        help="Automatically validate and repair mesh issues before processing (fixes holes, non-manifold edges, degenerate faces, etc.)")
+
     args = parser.parse_args()
     modify_3mf(
         hueforge_path=args.hueforge,
@@ -463,5 +500,6 @@ if __name__ == "__main__":
         yshift=args.yshift,
         zshift=args.zshift,
         force_scale=args.scale,
-        preserve_colors=args.preserve_colors
+        preserve_colors=args.preserve_colors,
+        auto_repair=args.auto_repair
     )
