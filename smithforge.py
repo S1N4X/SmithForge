@@ -279,7 +279,7 @@ def sample_perimeter_height(mesh, num_samples=40):
     """
     Sample Z-heights along the perimeter of a mesh to detect the background height.
 
-    Uses the mesh boundary to sample points and finds the most common height value,
+    Uses boundary edge detection to find perimeter vertices and samples their heights,
     which typically represents the Hueforge background layer.
 
     Args:
@@ -291,52 +291,76 @@ def sample_perimeter_height(mesh, num_samples=40):
     """
     import numpy as np
 
-    # Get the 2D boundary of the mesh (edges that appear only once)
-    # We'll work in XY plane projection
-    outline = mesh.outline()
+    # Method 1: Try to find boundary edges (edges that appear only once)
+    try:
+        # Get all edges
+        edges = mesh.edges_unique
+        # Count how many faces each edge belongs to
+        edge_face_count = np.bincount(mesh.edges_unique_inverse)
+        # Boundary edges appear in only one face
+        boundary_mask = edge_face_count == 1
+        boundary_edges = edges[boundary_mask]
 
-    if outline is None or len(outline.entities) == 0:
-        print("⚠️  Warning: Could not extract mesh outline, using mesh bounds")
-        # Fallback: use the minimum Z value
-        return mesh.bounds[0][2]
+        if len(boundary_edges) > 0:
+            # Get unique vertices from boundary edges
+            boundary_vertices = np.unique(boundary_edges.flatten())
+            z_heights = mesh.vertices[boundary_vertices, 2]
+            print(f"📏 Found {len(boundary_vertices)} boundary vertices")
+        else:
+            # Fallback to Method 2
+            raise ValueError("No boundary edges found")
 
-    # Sample points along the outline
-    z_heights = []
+    except Exception as e:
+        # Method 2: Use 2D convex hull to find perimeter vertices
+        print("ℹ️  Using 2D projection method for perimeter detection")
+        try:
+            import shapely.geometry
 
-    for entity in outline.entities:
-        # Get points from this path entity
-        points = entity.discrete(outline.vertices)
+            # Project vertices to 2D
+            points_2d = mesh.vertices[:, :2]
 
-        # For each 2D point, find closest vertex in original mesh and get its Z
-        for point_2d in points:
-            # Find vertices close to this XY position
-            distances = np.sqrt(
-                (mesh.vertices[:, 0] - point_2d[0])**2 +
-                (mesh.vertices[:, 1] - point_2d[1])**2
-            )
-            closest_idx = np.argmin(distances)
-            z_heights.append(mesh.vertices[closest_idx, 2])
+            # Create convex hull
+            hull = shapely.geometry.MultiPoint(points_2d).convex_hull
+
+            # Find vertices that are on or near the hull boundary
+            z_heights = []
+            tolerance = 0.5  # mm tolerance for being "on" the boundary
+
+            for i, vertex_2d in enumerate(points_2d):
+                point = shapely.geometry.Point(vertex_2d)
+                if hull.boundary.distance(point) < tolerance:
+                    z_heights.append(mesh.vertices[i, 2])
+
+            z_heights = np.array(z_heights)
+            print(f"📏 Found {len(z_heights)} perimeter vertices using 2D hull")
+
+        except Exception as e2:
+            # Final fallback: sample from top layer
+            print(f"⚠️  Warning: Could not detect perimeter, using top layer sampling")
+            # Get vertices in the top 10% of Z range
+            z_min, z_max = mesh.vertices[:, 2].min(), mesh.vertices[:, 2].max()
+            z_threshold = z_max - 0.1 * (z_max - z_min)
+            top_vertices = mesh.vertices[mesh.vertices[:, 2] > z_threshold]
+            z_heights = top_vertices[:, 2]
 
     if len(z_heights) == 0:
-        print("⚠️  Warning: No perimeter points sampled, using minimum Z")
-        return mesh.bounds[0][2]
+        print("⚠️  Warning: No perimeter points found, using mesh maximum Z")
+        return mesh.bounds[1][2]
 
-    # Limit to num_samples evenly spaced points
+    # Limit to num_samples if we have too many
     if len(z_heights) > num_samples:
         indices = np.linspace(0, len(z_heights) - 1, num_samples, dtype=int)
-        z_heights = [z_heights[i] for i in indices]
-
-    z_heights = np.array(z_heights)
+        z_heights = z_heights[indices]
 
     # Find the mode using histogram binning
-    # Use 20 bins to group similar heights
-    hist, bins = np.histogram(z_heights, bins=20)
+    # Use fewer bins for more stable mode detection
+    hist, bins = np.histogram(z_heights, bins=min(10, len(z_heights)//2))
     mode_bin_idx = np.argmax(hist)
 
     # Return the center of the most common bin
     background_height = (bins[mode_bin_idx] + bins[mode_bin_idx + 1]) / 2.0
 
-    print(f"📏 Sampled {len(z_heights)} perimeter points")
+    print(f"📏 Sampled {len(z_heights)} Z-heights from perimeter")
     print(f"📏 Detected background height: {background_height:.3f} mm")
     print(f"📏 Height range: {z_heights.min():.3f} to {z_heights.max():.3f} mm")
 
@@ -380,22 +404,52 @@ def create_fill_geometry(base_mesh, hueforge_mesh, fill_height, base_top_z):
     print(f"📐 Gap area detected: {gap_region.area:.2f} mm²")
 
     # Calculate the height of the fill extrusion
-    # Fill should go from base_top_z to the fill_height
-    fill_thickness = fill_height - base_top_z
-
-    if fill_thickness <= 0:
-        print(f"⚠️  Warning: Fill height ({fill_height:.3f}) is below base top ({base_top_z:.3f})")
-        print("    Using minimum thickness of 0.1mm")
-        fill_thickness = 0.1
+    # Fill should extend from base_top_z to the detected fill_height
+    # The fill_height is the detected background height of the Hueforge
+    fill_thickness = max(fill_height - base_top_z, 0.2)  # Ensure minimum thickness
 
     print(f"📐 Creating fill geometry: thickness = {fill_thickness:.3f} mm")
+    print(f"   Base top: {base_top_z:.3f} mm, Fill top: {fill_height:.3f} mm")
 
     # Extrude the gap region to create fill mesh
+    # Handle both Polygon and MultiPolygon cases
     try:
-        fill_mesh = trimesh.creation.extrude_polygon(gap_region, height=fill_thickness)
+        fill_meshes = []
 
-        # Position the fill mesh at the correct Z height (on top of base)
-        fill_mesh.apply_translation([0, 0, base_top_z])
+        # Check if it's a MultiPolygon or single Polygon
+        from shapely.geometry import Polygon, MultiPolygon
+
+        if isinstance(gap_region, MultiPolygon):
+            print(f"📐 Gap region has {len(gap_region.geoms)} separate areas")
+            # Handle each polygon separately
+            for i, polygon in enumerate(gap_region.geoms):
+                if polygon.area > 1e-6:  # Skip tiny fragments
+                    try:
+                        mesh = trimesh.creation.extrude_polygon(polygon, height=fill_thickness)
+                        mesh.apply_translation([0, 0, base_top_z])
+                        fill_meshes.append(mesh)
+                        print(f"   Created fill mesh {i+1}: {len(mesh.vertices)} vertices")
+                    except Exception as e:
+                        print(f"   ⚠️  Failed to create fill for polygon {i+1}: {e}")
+        elif isinstance(gap_region, Polygon):
+            # Single polygon case
+            mesh = trimesh.creation.extrude_polygon(gap_region, height=fill_thickness)
+            mesh.apply_translation([0, 0, base_top_z])
+            fill_meshes.append(mesh)
+        else:
+            print(f"⚠️  Unexpected gap region type: {type(gap_region)}")
+            return None
+
+        # Combine all fill meshes if there are multiple
+        if len(fill_meshes) == 0:
+            print("⚠️  No fill meshes could be created")
+            return None
+        elif len(fill_meshes) == 1:
+            fill_mesh = fill_meshes[0]
+        else:
+            # Combine multiple meshes
+            fill_mesh = trimesh.util.concatenate(fill_meshes)
+            print(f"📐 Combined {len(fill_meshes)} fill meshes")
 
         print(f"✅ Fill geometry created: {len(fill_mesh.vertices)} vertices, {len(fill_mesh.faces)} faces")
 
@@ -403,6 +457,8 @@ def create_fill_geometry(base_mesh, hueforge_mesh, fill_height, base_top_z):
 
     except Exception as e:
         print(f"⚠️  Failed to create fill geometry: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def modify_3mf(hueforge_path, base_path, output_path,
@@ -572,8 +628,9 @@ def modify_3mf(hueforge_path, base_path, output_path,
     if fill_gaps:
         print("\n🔧 === GAP FILLING MODE ENABLED ===")
 
-        # Sample perimeter height from the clipped Hueforge
-        background_height = sample_perimeter_height(hueforge_clipped)
+        # Sample perimeter height from the original scaled Hueforge (before clipping)
+        # This gives us the true background height of the Hueforge model
+        background_height = sample_perimeter_height(hueforge)
 
         # Create fill geometry
         fill_mesh = create_fill_geometry(base, hueforge_clipped, background_height, base_top_z)
