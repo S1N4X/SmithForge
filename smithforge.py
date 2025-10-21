@@ -624,7 +624,7 @@ def modify_3mf(hueforge_path, base_path, output_path,
     # ----------------------
     # STEP 7.5) Fill gaps if requested
     # ----------------------
-    overlay_to_union = hueforge_clipped
+    fill_mesh = None
     if fill_gaps:
         print("\n🔧 === GAP FILLING MODE ENABLED ===")
 
@@ -636,15 +636,9 @@ def modify_3mf(hueforge_path, base_path, output_path,
         fill_mesh = create_fill_geometry(base, hueforge_clipped, background_height, base_top_z)
 
         if fill_mesh is not None:
-            # Union the fill with the clipped Hueforge
-            print("Combining fill geometry with clipped Hueforge...")
-            try:
-                overlay_to_union = hueforge_clipped.union(fill_mesh)
-                print("✅ Fill geometry successfully merged with overlay")
-            except Exception as e:
-                print(f"⚠️  Failed to merge fill geometry: {e}")
-                print("    Proceeding without fill...")
-                overlay_to_union = hueforge_clipped
+            print("✅ Fill geometry created and ready for final union")
+        else:
+            print("ℹ️  No fill geometry needed or creation failed")
 
         print("🔧 === GAP FILLING COMPLETE ===\n")
 
@@ -652,7 +646,15 @@ def modify_3mf(hueforge_path, base_path, output_path,
     # STEP 8) Union => single manifold
     # ----------------------
     print("Union clipped Hueforge + base => final mesh...")
-    final_mesh = base.union(overlay_to_union)
+
+    # If we have fill geometry, union all three meshes together
+    # Otherwise just union base and Hueforge
+    if fill_mesh is not None:
+        print("Creating union of base + overlay + fill geometry...")
+        # Union all three meshes at once for better geometry handling
+        final_mesh = base.union([hueforge_clipped, fill_mesh])
+    else:
+        final_mesh = base.union(hueforge_clipped)
 
     # ----------------------
     # STEP 9) Export
