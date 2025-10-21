@@ -275,12 +275,143 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
     except Exception as e:
         print(f"⚠️  Error injecting color metadata: {e}")
 
+def sample_perimeter_height(mesh, num_samples=40):
+    """
+    Sample Z-heights along the perimeter of a mesh to detect the background height.
+
+    Uses the mesh boundary to sample points and finds the most common height value,
+    which typically represents the Hueforge background layer.
+
+    Args:
+        mesh: trimesh.Trimesh object
+        num_samples: Number of points to sample along the perimeter (default 40)
+
+    Returns:
+        float: The most common (mode) Z-height value from perimeter samples
+    """
+    import numpy as np
+
+    # Get the 2D boundary of the mesh (edges that appear only once)
+    # We'll work in XY plane projection
+    outline = mesh.outline()
+
+    if outline is None or len(outline.entities) == 0:
+        print("⚠️  Warning: Could not extract mesh outline, using mesh bounds")
+        # Fallback: use the minimum Z value
+        return mesh.bounds[0][2]
+
+    # Sample points along the outline
+    z_heights = []
+
+    for entity in outline.entities:
+        # Get points from this path entity
+        points = entity.discrete(outline.vertices)
+
+        # For each 2D point, find closest vertex in original mesh and get its Z
+        for point_2d in points:
+            # Find vertices close to this XY position
+            distances = np.sqrt(
+                (mesh.vertices[:, 0] - point_2d[0])**2 +
+                (mesh.vertices[:, 1] - point_2d[1])**2
+            )
+            closest_idx = np.argmin(distances)
+            z_heights.append(mesh.vertices[closest_idx, 2])
+
+    if len(z_heights) == 0:
+        print("⚠️  Warning: No perimeter points sampled, using minimum Z")
+        return mesh.bounds[0][2]
+
+    # Limit to num_samples evenly spaced points
+    if len(z_heights) > num_samples:
+        indices = np.linspace(0, len(z_heights) - 1, num_samples, dtype=int)
+        z_heights = [z_heights[i] for i in indices]
+
+    z_heights = np.array(z_heights)
+
+    # Find the mode using histogram binning
+    # Use 20 bins to group similar heights
+    hist, bins = np.histogram(z_heights, bins=20)
+    mode_bin_idx = np.argmax(hist)
+
+    # Return the center of the most common bin
+    background_height = (bins[mode_bin_idx] + bins[mode_bin_idx + 1]) / 2.0
+
+    print(f"📏 Sampled {len(z_heights)} perimeter points")
+    print(f"📏 Detected background height: {background_height:.3f} mm")
+    print(f"📏 Height range: {z_heights.min():.3f} to {z_heights.max():.3f} mm")
+
+    return background_height
+
+def create_fill_geometry(base_mesh, hueforge_mesh, fill_height, base_top_z):
+    """
+    Create fill geometry to fill gaps between a scaled-down Hueforge overlay and base boundaries.
+
+    Args:
+        base_mesh: The base mesh (defines outer boundary)
+        hueforge_mesh: The Hueforge overlay mesh (defines inner boundary)
+        fill_height: The Z-height at which to create the fill (typically Hueforge background height)
+        base_top_z: The Z coordinate of the top of the base mesh
+
+    Returns:
+        trimesh.Trimesh: Fill mesh, or None if no gap exists
+    """
+    import numpy as np
+
+    # Get 2D projections (XY plane)
+    base_verts_2d = [(v[0], v[1]) for v in base_mesh.vertices]
+    hf_verts_2d = [(v[0], v[1]) for v in hueforge_mesh.vertices]
+
+    # Create convex hulls for both shapes
+    base_hull = shapely.geometry.MultiPoint(base_verts_2d).convex_hull
+    hf_hull = shapely.geometry.MultiPoint(hf_verts_2d).convex_hull
+
+    # Check if there's actually a gap to fill
+    if hf_hull.contains(base_hull) or hf_hull.equals(base_hull):
+        print("ℹ️  Hueforge covers entire base area - no gap filling needed")
+        return None
+
+    # Compute the difference region (gap area between base and Hueforge)
+    gap_region = base_hull.difference(hf_hull)
+
+    if gap_region.is_empty or gap_region.area < 1e-6:
+        print("ℹ️  Gap area is negligible - no fill geometry created")
+        return None
+
+    print(f"📐 Gap area detected: {gap_region.area:.2f} mm²")
+
+    # Calculate the height of the fill extrusion
+    # Fill should go from base_top_z to the fill_height
+    fill_thickness = fill_height - base_top_z
+
+    if fill_thickness <= 0:
+        print(f"⚠️  Warning: Fill height ({fill_height:.3f}) is below base top ({base_top_z:.3f})")
+        print("    Using minimum thickness of 0.1mm")
+        fill_thickness = 0.1
+
+    print(f"📐 Creating fill geometry: thickness = {fill_thickness:.3f} mm")
+
+    # Extrude the gap region to create fill mesh
+    try:
+        fill_mesh = trimesh.creation.extrude_polygon(gap_region, height=fill_thickness)
+
+        # Position the fill mesh at the correct Z height (on top of base)
+        fill_mesh.apply_translation([0, 0, base_top_z])
+
+        print(f"✅ Fill geometry created: {len(fill_mesh.vertices)} vertices, {len(fill_mesh.faces)} faces")
+
+        return fill_mesh
+
+    except Exception as e:
+        print(f"⚠️  Failed to create fill geometry: {e}")
+        return None
+
 def modify_3mf(hueforge_path, base_path, output_path,
                scaledown, rotate_base,
                xshift, yshift, zshift,
                force_scale=None,
                preserve_colors=False,
-               auto_repair=False):
+               auto_repair=False,
+               fill_gaps=False):
     """
     1) Rotate the base around Z by --rotatebase degrees (if nonzero).
     2) Compute scale so Hueforge fully occupies at least one dimension => scale = max(scale_x, scale_y).
@@ -290,9 +421,10 @@ def modify_3mf(hueforge_path, base_path, output_path,
     6) Apply user-specified shifts: --xshift, --yshift, --zshift
     7) Build a 2D convex hull from base's XY, extrude => 'cutter'.
     8) Intersect Hueforge with that cutter => clip outside base shape.
-    9) Union clipped Hueforge + base => single manifold => export.
-    10) If preserve_colors=True, extract color layers from Hueforge and inject into output with adjusted Z heights.
-    11) If auto_repair=True, automatically validate and repair mesh issues before processing.
+    9) If fill_gaps=True, detect background height and create fill geometry for gaps between overlay and base.
+    10) Union clipped Hueforge (+ fill if enabled) + base => single manifold => export.
+    11) If preserve_colors=True, extract color layers from Hueforge and inject into output with adjusted Z heights.
+    12) If auto_repair=True, automatically validate and repair mesh issues before processing.
     """
 
     # Extract color layer information if requested
@@ -434,10 +566,36 @@ def modify_3mf(hueforge_path, base_path, output_path,
         return
 
     # ----------------------
+    # STEP 7.5) Fill gaps if requested
+    # ----------------------
+    overlay_to_union = hueforge_clipped
+    if fill_gaps:
+        print("\n🔧 === GAP FILLING MODE ENABLED ===")
+
+        # Sample perimeter height from the clipped Hueforge
+        background_height = sample_perimeter_height(hueforge_clipped)
+
+        # Create fill geometry
+        fill_mesh = create_fill_geometry(base, hueforge_clipped, background_height, base_top_z)
+
+        if fill_mesh is not None:
+            # Union the fill with the clipped Hueforge
+            print("Combining fill geometry with clipped Hueforge...")
+            try:
+                overlay_to_union = hueforge_clipped.union(fill_mesh)
+                print("✅ Fill geometry successfully merged with overlay")
+            except Exception as e:
+                print(f"⚠️  Failed to merge fill geometry: {e}")
+                print("    Proceeding without fill...")
+                overlay_to_union = hueforge_clipped
+
+        print("🔧 === GAP FILLING COMPLETE ===\n")
+
+    # ----------------------
     # STEP 8) Union => single manifold
     # ----------------------
     print("Union clipped Hueforge + base => final mesh...")
-    final_mesh = base.union(hueforge_clipped)
+    final_mesh = base.union(overlay_to_union)
 
     # ----------------------
     # STEP 9) Export
@@ -489,6 +647,10 @@ if __name__ == "__main__":
     parser.add_argument("--auto-repair", action="store_true",
                         help="Automatically validate and repair mesh issues before processing (fixes holes, non-manifold edges, degenerate faces, etc.)")
 
+    # Gap filling
+    parser.add_argument("--fill-gaps", action="store_true",
+                        help="Fill gaps between scaled overlay and base boundaries with background height material (useful when overlay is scaled smaller than base)")
+
     args = parser.parse_args()
     modify_3mf(
         hueforge_path=args.hueforge,
@@ -501,5 +663,6 @@ if __name__ == "__main__":
         zshift=args.zshift,
         force_scale=args.scale,
         preserve_colors=args.preserve_colors,
-        auto_repair=args.auto_repair
+        auto_repair=args.auto_repair,
+        fill_gaps=args.fill_gaps
     )
