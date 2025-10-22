@@ -78,10 +78,20 @@ class Lib3mfExporter:
                 print("❌ Error: Failed to add mesh to model")
                 return False
 
-            # Add build item (this creates the component structure)
+            # Create component-based structure (required by Bambu Studio)
             if verbose:
-                print("  🏗️ Creating build structure...")
-            model.AddBuildItem(mesh_object, self.wrapper.GetIdentityTransform())
+                print("  🏗️ Creating component structure...")
+
+            # Create a components object
+            components_object = model.AddComponentsObject()
+
+            # Add the mesh as a component within the components object
+            components_object.AddComponent(mesh_object, self.wrapper.GetIdentityTransform())
+
+            # Add the components object to the build (not the mesh directly)
+            if verbose:
+                print("  🏗️ Adding to build...")
+            model.AddBuildItem(components_object, self.wrapper.GetIdentityTransform())
 
             # Add color metadata if provided
             if color_data:
