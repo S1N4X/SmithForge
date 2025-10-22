@@ -494,7 +494,8 @@ def modify_3mf(hueforge_path, base_path, output_path,
                preserve_colors=False,
                auto_repair=False,
                fill_gaps=False,
-               inject_colors_text=None):
+               inject_colors_text=None,
+               output_format="standard"):
     """
     1) Rotate the base around Z by --rotatebase degrees (if nonzero).
     2) Compute scale so Hueforge fully occupies at least one dimension => scale = max(scale_x, scale_y).
@@ -509,6 +510,7 @@ def modify_3mf(hueforge_path, base_path, output_path,
     11) If preserve_colors=True, extract color layers from Hueforge and inject into output with adjusted Z heights.
     12) If inject_colors_text is provided, parse text and inject color layers (mutually exclusive with preserve_colors).
     13) If auto_repair=True, automatically validate and repair mesh issues before processing.
+    14) If output_format='bambu', use lib3mf to generate Bambu Studio compatible 3MF with Production Extension structure.
     """
 
     # Validate mutually exclusive options
@@ -706,7 +708,39 @@ def modify_3mf(hueforge_path, base_path, output_path,
     # STEP 9) Export
     # ----------------------
     print(f"Exporting final mesh to {output_path}")
-    final_mesh.export(output_path)
+
+    # Choose export method based on output format
+    if output_format == "bambu":
+        print("📦 Using Bambu Studio compatible export (lib3mf)")
+        try:
+            from lib3mf_exporter import Lib3mfExporter
+            exporter = Lib3mfExporter()
+
+            # Export using lib3mf with color data
+            success = exporter.export_bambu_3mf(
+                final_mesh,
+                output_path,
+                color_data=color_data,
+                verbose=True
+            )
+
+            if not success:
+                print("⚠️  lib3mf export failed, falling back to standard export")
+                final_mesh.export(output_path)
+                # Still inject color metadata below if needed
+            else:
+                # Color metadata already injected by lib3mf exporter
+                print("✅ Bambu-compatible 3MF exported successfully")
+                print("✅ Done! Rotation, user shift, scaling, centering, clipping, embedding, and union complete.")
+                return  # Exit early, metadata already handled
+
+        except ImportError:
+            print("⚠️  lib3mf_exporter module not found, falling back to standard export")
+            final_mesh.export(output_path)
+    else:
+        # Standard trimesh export
+        print("📦 Using standard 3MF export (trimesh)")
+        final_mesh.export(output_path)
 
     # ----------------------
     # STEP 10) Inject color metadata if requested
@@ -779,6 +813,10 @@ if __name__ == "__main__":
     parser.add_argument("--fill-gaps", action="store_true",
                         help="Fill gaps between scaled overlay and base boundaries with background height material (useful when overlay is scaled smaller than base)")
 
+    # Output format selection
+    parser.add_argument("--output-format", type=str, choices=["standard", "bambu"], default="standard",
+                        help="Output 3MF format: 'standard' (trimesh/universal) or 'bambu' (Bambu Studio compatible with Production Extension)")
+
     args = parser.parse_args()
     modify_3mf(
         hueforge_path=args.hueforge,
@@ -793,5 +831,6 @@ if __name__ == "__main__":
         preserve_colors=args.preserve_colors,
         auto_repair=args.auto_repair,
         fill_gaps=args.fill_gaps,
-        inject_colors_text=args.inject_colors_text
+        inject_colors_text=args.inject_colors_text,
+        output_format=args.output_format
     )
