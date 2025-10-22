@@ -34,13 +34,79 @@ COLOR_MAP = {
     'gray': '#808080',
     'grey': '#808080',
 
-    # BambuLab specific colors
-    'cobalt blue': '#0047AB',
+    # BambuLab PLA Basic colors (30 colors)
+    'jade white': '#F0FFF0',
+    'silver': '#C0C0C0',
+    'light gray': '#D3D3D3',
+    'dark gray': '#696969',
+    'hot pink': '#FF69B4',
+    'maroon red': '#800000',
+    'beige': '#F5F5DC',
     'sunflower yellow': '#FFDA03',
-    'ivory white': '#FFFFF0',
-    'matte ivory white': '#F5F5DC',
-    'basic black': '#000000',
-    'basic white': '#FFFFFF',
+    'gold': '#FFD700',
+    'pumpkin orange': '#FF7518',
+    'bambu green': '#00A86B',
+    'mistletoe green': '#50C878',
+    'bright green': '#66FF00',
+    'blue grey': '#6699CC',
+    'cobalt blue': '#0047AB',
+    'turquoise': '#40E0D0',
+    'indigo purple': '#4B0082',
+    'bronze': '#CD7F32',
+    'cocoa brown': '#D2691E',
+
+    # BambuLab PLA Matte colors (25 colors)
+    'matte ivory white': '#FFFFF0',
+    'ivory white': '#FFFFF0',  # Also accept without "matte"
+    'matte ash gray': '#B2BEB5',
+    'ash gray': '#B2BEB5',
+    'matte charcoal': '#36454F',
+    'charcoal': '#36454F',
+    'matte bone white': '#F9F6EE',
+    'bone white': '#F9F6EE',
+    'matte nardo gray': '#7A7D7A',
+    'nardo gray': '#7A7D7A',
+    'matte lemon yellow': '#FFF700',
+    'lemon yellow': '#FFF700',
+    'matte desert tan': '#C19A6B',
+    'desert tan': '#C19A6B',
+    'matte mandarin orange': '#FF8C00',
+    'mandarin orange': '#FF8C00',
+    'matte scarlet red': '#FF2400',
+    'scarlet red': '#FF2400',
+    'matte dark red': '#8B0000',
+    'dark red': '#8B0000',
+    'matte terracotta': '#CC4125',
+    'terracotta': '#CC4125',
+    'matte sakura pink': '#FFB7C5',
+    'sakura pink': '#FFB7C5',
+    'matte plum': '#DDA0DD',
+    'plum': '#DDA0DD',
+    'matte lilac purple': '#C8A2C8',
+    'lilac purple': '#C8A2C8',
+    'lilac': '#C8A2C8',
+    'matte grass green': '#7CFC00',
+    'grass green': '#7CFC00',
+    'matte apple green': '#8DB600',
+    'apple green': '#8DB600',
+    'matte dark green': '#013220',
+    'dark green': '#013220',
+    'matte ice blue': '#99FFFF',
+    'ice blue': '#99FFFF',
+    'matte sky blue': '#87CEEB',
+    'sky blue': '#87CEEB',
+    'matte marine blue': '#0080FF',
+    'marine blue': '#0080FF',
+    'matte dark blue': '#00008B',
+    'dark blue': '#00008B',
+    'matte latte brown': '#B5651D',
+    'latte brown': '#B5651D',
+    'matte dark brown': '#654321',
+    'dark brown': '#654321',
+    'matte dark chocolate': '#3B2F2F',
+    'dark chocolate': '#3B2F2F',
+    'matte caramel': '#FFD59A',
+    'caramel': '#FFD59A',
 
     # Common filament colors
     'transparent': '#FFFFFF80',
@@ -52,6 +118,10 @@ COLOR_MAP = {
     'teal': '#008080',
     'maroon': '#800000',
     'olive': '#808000',
+
+    # Legacy mappings (kept for compatibility)
+    'basic black': '#000000',
+    'basic white': '#FFFFFF',
 }
 
 
@@ -75,7 +145,7 @@ def normalize_color_name(color_name: str) -> str:
 
 def color_name_to_hex(color_name: str) -> str:
     """
-    Convert color name to hex code.
+    Convert color name to hex code with smart fallback.
 
     Args:
         color_name: Color name (e.g., "Black", "Cobalt Blue")
@@ -94,7 +164,43 @@ def color_name_to_hex(color_name: str) -> str:
         if color_key in normalized or normalized in color_key:
             return hex_code
 
-    # Default to gray if no match found
+    # Smart fallback based on keywords in the color name
+    fallback_colors = {
+        'red': '#FF0000',
+        'blue': '#0000FF',
+        'green': '#00FF00',
+        'yellow': '#FFFF00',
+        'orange': '#FFA500',
+        'purple': '#800080',
+        'pink': '#FFC0CB',
+        'brown': '#8B4513',
+        'white': '#FFFFFF',
+        'black': '#000000',
+        'gray': '#808080',
+        'grey': '#808080',
+        'gold': '#FFD700',
+        'silver': '#C0C0C0',
+        'bronze': '#CD7F32',
+        'cyan': '#00FFFF',
+        'magenta': '#FF00FF',
+        'teal': '#008080',
+        'navy': '#000080',
+        'maroon': '#800000',
+        'olive': '#808000',
+        'turquoise': '#40E0D0',
+        'violet': '#8A2BE2',
+        'lime': '#00FF00',
+        'beige': '#F5F5DC',
+        'tan': '#D2B48C',
+    }
+
+    lower = normalized.lower()
+    for keyword, fallback_hex in fallback_colors.items():
+        if keyword in lower:
+            print(f"⚠️  Using generic {keyword} for unrecognized color '{color_name}'")
+            return fallback_hex
+
+    # Ultimate fallback to gray
     print(f"⚠️  Warning: Could not map color '{color_name}' to hex, using gray")
     return '#808080'
 

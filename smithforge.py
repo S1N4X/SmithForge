@@ -729,10 +729,14 @@ def modify_3mf(hueforge_path, base_path, output_path,
                 final_mesh.export(output_path)
                 # Still inject color metadata below if needed
             else:
-                # Color metadata already injected by lib3mf exporter
+                # lib3mf export successful
                 print("✅ Bambu-compatible 3MF exported successfully")
-                print("✅ Done! Rotation, user shift, scaling, centering, clipping, embedding, and union complete.")
-                return  # Exit early, metadata already handled
+                if not color_data:
+                    # No color data, safe to exit
+                    print("✅ Done! Rotation, user shift, scaling, centering, clipping, embedding, and union complete.")
+                    return
+                # Has color data - continue to inject_color_metadata below for XML files
+                print("📝 Proceeding to inject color metadata XML files...")
 
         except ImportError:
             print("⚠️  lib3mf_exporter module not found, falling back to standard export")
