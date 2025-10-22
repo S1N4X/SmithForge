@@ -35,6 +35,18 @@ except ImportError:
         auto_repair_mesh = None
         RepairReport = None
 
+# Import text layer parser module
+try:
+    from text_layer_parser import parse_swap_instructions, validate_layer_heights
+except ImportError:
+    # If running from parent directory
+    try:
+        from smithforge.text_layer_parser import parse_swap_instructions, validate_layer_heights
+    except ImportError:
+        print("⚠️  Warning: Could not import text_layer_parser module. Text injection will be disabled.")
+        parse_swap_instructions = None
+        validate_layer_heights = None
+
 # Configuration constants
 DEFAULT_EMBEDDING_OVERLAP_MM = 0.1  # Default Z-axis overlap for proper model union
 
@@ -192,46 +204,16 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
             slice_info_path = os.path.join(metadata_dir, 'slice_info.config')
             slice_info_tree.write(slice_info_path, encoding='UTF-8', xml_declaration=True)
 
-            # Create minimal model_settings.config for Bambu Studio compatibility
-            model_settings_xml = ET.Element('config')
-            obj = ET.SubElement(model_settings_xml, 'object', id='1')
-            ET.SubElement(obj, 'metadata', key='name', value='SmithForge Combined Model')
-            ET.SubElement(obj, 'metadata', key='extruder', value='1')
+            # NOTE: We're NOT creating model_settings.config anymore
+            # Bambu Studio expects a specific 3MF structure with Objects/ subdirectory
+            # that trimesh doesn't create. Adding model_settings.config causes
+            # "No such node (objects)" error. The layer colors should still work
+            # without this file when you slice the model.
 
-            part = ET.SubElement(obj, 'part', id='1', subtype='normal_part')
-            ET.SubElement(part, 'metadata', key='name', value='Combined')
-            ET.SubElement(part, 'metadata', key='matrix', value='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1')
-
-            plate_elem = ET.SubElement(model_settings_xml, 'plate')
-            ET.SubElement(plate_elem, 'metadata', key='plater_id', value='1')
-            ET.SubElement(plate_elem, 'metadata', key='plater_name', value='')
-            ET.SubElement(plate_elem, 'metadata', key='locked', value='false')
-
-            # Set up filament mapping based on number of colors
-            num_filaments = len(color_data.get('filament_colours', []))
-            if num_filaments > 0:
-                filament_maps = ' '.join([str(i) for i in range(1, num_filaments + 1)])
-                ET.SubElement(plate_elem, 'metadata', key='filament_maps', value=filament_maps)
-
-            model_instance = ET.SubElement(plate_elem, 'model_instance')
-            ET.SubElement(model_instance, 'metadata', key='object_id', value='1')
-            ET.SubElement(model_instance, 'metadata', key='instance_id', value='0')
-
-            assemble = ET.SubElement(model_settings_xml, 'assemble')
-            ET.SubElement(assemble, 'assemble_item',
-                         object_id='1',
-                         instance_id='0',
-                         transform='1 0 0 0 1 0 0 0 1 0 0 0',
-                         offset='0 0 0')
-
-            model_settings_tree = ET.ElementTree(model_settings_xml)
-            ET.indent(model_settings_tree, space='  ')
-            model_settings_path = os.path.join(metadata_dir, 'model_settings.config')
-            model_settings_tree.write(model_settings_path, encoding='UTF-8', xml_declaration=True)
-
-            print("✅ Added Bambu Lab identification metadata for compatibility")
+            print("✅ Added Bambu Lab slice_info metadata for compatibility")
 
             # Copy layer_config_ranges.xml if it exists and adjust Z values
+            # OR generate it from layer data for text injection mode
             if 'layer_config_ranges_xml' in color_data:
                 try:
                     # Parse the XML
@@ -258,6 +240,50 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
                     print("✅ Added layer_config_ranges.xml with adjusted Z values")
                 except Exception as e:
                     print(f"⚠️  Could not process layer_config_ranges.xml: {e}")
+            else:
+                # Generate layer_config_ranges.xml from layer data (text injection mode)
+                try:
+                    ranges_root = ET.Element('ranges')
+
+                    # Create a range for each layer transition
+                    layers = color_data['layers']
+                    filament_colors = color_data.get('filament_colours', [])
+
+                    for i, layer_info in enumerate(layers):
+                        adjusted_z = layer_info['top_z'] + z_offset
+
+                        # Determine min_z (previous layer's max_z, or 0 for first layer)
+                        if i == 0:
+                            min_z = 0.0
+                        else:
+                            min_z = layers[i-1]['top_z'] + z_offset
+
+                        # Get extruder number (1-indexed)
+                        extruder_num = int(layer_info.get('extruder', i + 1))
+
+                        # Get color
+                        color = layer_info.get('color', '#808080')
+
+                        # Create range element
+                        range_elem = ET.SubElement(ranges_root, 'range')
+                        range_elem.set('minZ', f"{min_z:.6f}")
+                        range_elem.set('maxZ', f"{adjusted_z:.6f}")
+
+                        # Add filament settings
+                        filament_color_elem = ET.SubElement(range_elem, 'filament_colour')
+                        filament_color_elem.text = color
+
+                        extruder_elem = ET.SubElement(range_elem, 'extruder')
+                        extruder_elem.text = str(extruder_num)
+
+                    # Write the generated XML
+                    ranges_tree = ET.ElementTree(ranges_root)
+                    ET.indent(ranges_tree, space=' ')
+                    ranges_path = os.path.join(metadata_dir, 'layer_config_ranges.xml')
+                    ranges_tree.write(ranges_path, encoding='utf-8', xml_declaration=True)
+                    print("✅ Generated layer_config_ranges.xml from text layer data")
+                except Exception as e:
+                    print(f"⚠️  Could not generate layer_config_ranges.xml: {e}")
 
             # Repack the 3MF
             temp_output = output_3mf_path + '.tmp'
@@ -467,7 +493,8 @@ def modify_3mf(hueforge_path, base_path, output_path,
                force_scale=None,
                preserve_colors=False,
                auto_repair=False,
-               fill_gaps=False):
+               fill_gaps=False,
+               inject_colors_text=None):
     """
     1) Rotate the base around Z by --rotatebase degrees (if nonzero).
     2) Compute scale so Hueforge fully occupies at least one dimension => scale = max(scale_x, scale_y).
@@ -480,16 +507,35 @@ def modify_3mf(hueforge_path, base_path, output_path,
     9) If fill_gaps=True, detect background height and create fill geometry for gaps between overlay and base.
     10) Union clipped Hueforge (+ fill if enabled) + base => single manifold => export.
     11) If preserve_colors=True, extract color layers from Hueforge and inject into output with adjusted Z heights.
-    12) If auto_repair=True, automatically validate and repair mesh issues before processing.
+    12) If inject_colors_text is provided, parse text and inject color layers (mutually exclusive with preserve_colors).
+    13) If auto_repair=True, automatically validate and repair mesh issues before processing.
     """
 
-    # Extract color layer information if requested
+    # Validate mutually exclusive options
+    if preserve_colors and inject_colors_text:
+        print("❌ Error: --preserve-colors and --inject-colors-text are mutually exclusive")
+        print("   Choose one: preserve existing layers OR inject from text")
+        return
+
+    # Extract or parse color layer information if requested
     color_data = None
     if preserve_colors:
         print("🎨 Extracting color layer information from Hueforge...")
         color_data = extract_color_layers(hueforge_path)
         if color_data is None:
             print("ℹ️  No color layer data found, proceeding without color preservation")
+
+    elif inject_colors_text:
+        if parse_swap_instructions is None:
+            print("❌ Error: Text layer parser not available")
+            return
+
+        print("🎨 Parsing color layer information from text...")
+        color_data = parse_swap_instructions(inject_colors_text)
+        if color_data is None:
+            print("❌ Error: Failed to parse swap instructions text")
+            return
+        print(f"✅ Parsed {len(color_data.get('layers', []))} color layers from text")
 
     print(f"Loading Hueforge: {hueforge_path}")
     hueforge_scene = load.load(hueforge_path)
@@ -665,7 +711,26 @@ def modify_3mf(hueforge_path, base_path, output_path,
     # ----------------------
     # STEP 10) Inject color metadata if requested
     # ----------------------
-    if preserve_colors and color_data:
+    if color_data:
+        # Validate layer heights if we have the validation function
+        if inject_colors_text and validate_layer_heights is not None:
+            final_model_height = final_mesh.bounds[1][2]  # Max Z of final mesh
+            print(f"📏 Validating layer heights against final model height ({final_model_height:.3f} mm)...")
+
+            # Create adjusted layer data for validation
+            adjusted_layers_for_validation = []
+            for layer in color_data['layers']:
+                adjusted_z = layer['top_z'] + final_z_offset
+                adjusted_layers_for_validation.append({
+                    'top_z': adjusted_z,
+                    'extruder': layer.get('extruder'),
+                    'color': layer.get('color')
+                })
+
+            validation_data = {'layers': adjusted_layers_for_validation}
+            if not validate_layer_heights(validation_data, final_model_height):
+                print("⚠️  Warning: Some layer heights may be out of bounds")
+
         print(f"🎨 Injecting color layer metadata (Z-offset: {final_z_offset:.3f} mm)...")
         inject_color_metadata(output_path, color_data, final_z_offset)
 
@@ -702,6 +767,10 @@ if __name__ == "__main__":
     parser.add_argument("--preserve-colors", action="store_true",
                         help="Preserve Hueforge color layer information in the output 3MF file (adjusts Z-heights for new position)")
 
+    # Color injection from text
+    parser.add_argument("--inject-colors-text", type=str,
+                        help="Inject color layer information from HueForge swap instructions text (mutually exclusive with --preserve-colors)")
+
     # Mesh repair
     parser.add_argument("--auto-repair", action="store_true",
                         help="Automatically validate and repair mesh issues before processing (fixes holes, non-manifold edges, degenerate faces, etc.)")
@@ -723,5 +792,6 @@ if __name__ == "__main__":
         force_scale=args.scale,
         preserve_colors=args.preserve_colors,
         auto_repair=args.auto_repair,
-        fill_gaps=args.fill_gaps
+        fill_gaps=args.fill_gaps,
+        inject_colors_text=args.inject_colors_text
     )
