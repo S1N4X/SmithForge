@@ -165,22 +165,36 @@ class Lib3mfExporter:
         """
         try:
             # Add metadata attachments for Bambu Studio
-            # This includes layer color information and filament data
-
-            # Note: lib3mf Python API may have limited metadata support
-            # For now, we'll add basic metadata and rely on post-processing
-            # to inject Bambu-specific XML files if needed
+            # AddMetaData signature: (namespace, name, value, type, must_preserve)
 
             if 'layers' in color_data and color_data['layers']:
                 # Add metadata key-value pairs
                 metadata = model.GetMetaDataGroup()
-                metadata.AddMetaData("http://schemas.bambulab.com/", "ColorLayers", "true")
-                metadata.AddMetaData("http://schemas.bambulab.com/", "LayerCount", str(len(color_data['layers'])))
+                metadata.AddMetaData(
+                    "http://schemas.bambulab.com/",
+                    "ColorLayers",
+                    "true",
+                    "xs:boolean",
+                    False
+                )
+                metadata.AddMetaData(
+                    "http://schemas.bambulab.com/",
+                    "LayerCount",
+                    str(len(color_data['layers'])),
+                    "xs:integer",
+                    False
+                )
 
             if 'filament_colours' in color_data:
                 filament_json = json.dumps(color_data['filament_colours'])
                 metadata = model.GetMetaDataGroup()
-                metadata.AddMetaData("http://schemas.bambulab.com/", "FilamentColors", filament_json)
+                metadata.AddMetaData(
+                    "http://schemas.bambulab.com/",
+                    "FilamentColors",
+                    filament_json,
+                    "xs:string",
+                    False
+                )
 
         except Exception as e:
             print(f"⚠️ Warning: Could not add all color metadata: {str(e)}")
