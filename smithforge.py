@@ -711,36 +711,37 @@ def modify_3mf(hueforge_path, base_path, output_path,
 
     # Choose export method based on output format
     if output_format == "bambu":
-        print("📦 Using Bambu Studio compatible export (lib3mf)")
-        try:
-            from lib3mf_exporter import Lib3mfExporter
-            exporter = Lib3mfExporter()
+        # Note: lib3mf Python API has limitations with Bambu Studio compatibility when used with color metadata
+        # If we have color data, use standard export + metadata injection instead
+        if color_data:
+            print("📦 Using standard 3MF export + color metadata injection (for Bambu compatibility)")
+            final_mesh.export(output_path)
+        else:
+            print("📦 Using Bambu Studio compatible export (lib3mf)")
+            try:
+                from lib3mf_exporter import Lib3mfExporter
+                exporter = Lib3mfExporter()
 
-            # Export using lib3mf with color data
-            success = exporter.export_bambu_3mf(
-                final_mesh,
-                output_path,
-                color_data=color_data,
-                verbose=True
-            )
+                # Export using lib3mf (no color data)
+                success = exporter.export_bambu_3mf(
+                    final_mesh,
+                    output_path,
+                    color_data=None,
+                    verbose=True
+                )
 
-            if not success:
-                print("⚠️  lib3mf export failed, falling back to standard export")
-                final_mesh.export(output_path)
-                # Still inject color metadata below if needed
-            else:
-                # lib3mf export successful
-                print("✅ Bambu-compatible 3MF exported successfully")
-                if not color_data:
-                    # No color data, safe to exit
+                if not success:
+                    print("⚠️  lib3mf export failed, falling back to standard export")
+                    final_mesh.export(output_path)
+                else:
+                    # lib3mf export successful
+                    print("✅ Bambu-compatible 3MF exported successfully")
                     print("✅ Done! Rotation, user shift, scaling, centering, clipping, embedding, and union complete.")
                     return
-                # Has color data - continue to inject_color_metadata below for XML files
-                print("📝 Proceeding to inject color metadata XML files...")
 
-        except ImportError:
-            print("⚠️  lib3mf_exporter module not found, falling back to standard export")
-            final_mesh.export(output_path)
+            except ImportError:
+                print("⚠️  lib3mf_exporter module not found, falling back to standard export")
+                final_mesh.export(output_path)
     else:
         # Standard trimesh export
         print("📦 Using standard 3MF export (trimesh)")
