@@ -190,100 +190,14 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
             with open(project_settings_path, 'w') as f:
                 json.dump(config, f, indent=4)
 
-            # Create Bambu Lab identification files to prevent "not from Bambu Lab" warning
-            # This ensures Bambu Studio recognizes the file and preserves color metadata
+            # NOTE: We do NOT create slice_info.config here because Bambu Studio CLI
+            # already creates it with the correct version. Overwriting it would
+            # downgrade the version and potentially break compatibility.
 
-            # Create slice_info.config with Bambu Lab identifiers
-            slice_info_xml = ET.Element('config')
-            header = ET.SubElement(slice_info_xml, 'header')
-            ET.SubElement(header, 'header_item', key='X-BBL-Client-Type', value='slicer')
-            ET.SubElement(header, 'header_item', key='X-BBL-Client-Version', value='02.00.03.54')
-
-            slice_info_tree = ET.ElementTree(slice_info_xml)
-            ET.indent(slice_info_tree, space='  ')
-            slice_info_path = os.path.join(metadata_dir, 'slice_info.config')
-            slice_info_tree.write(slice_info_path, encoding='UTF-8', xml_declaration=True)
-
-            # NOTE: We're NOT creating model_settings.config anymore
-            # Bambu Studio expects a specific 3MF structure with Objects/ subdirectory
-            # that trimesh doesn't create. Adding model_settings.config causes
-            # "No such node (objects)" error. The layer colors should still work
-            # without this file when you slice the model.
-
-            print("✅ Added Bambu Lab slice_info metadata for compatibility")
-
-            # Copy layer_config_ranges.xml if it exists and adjust Z values
-            # OR generate it from layer data for text injection mode
-            if 'layer_config_ranges_xml' in color_data:
-                try:
-                    # Parse the XML
-                    ranges_root = ET.fromstring(color_data['layer_config_ranges_xml'])
-
-                    # Adjust all min_z and max_z values
-                    for range_elem in ranges_root.findall('.//range'):
-                        min_z = range_elem.get('min_z')
-                        max_z = range_elem.get('max_z')
-
-                        if min_z:
-                            adjusted_min = float(min_z) + z_offset
-                            range_elem.set('min_z', str(adjusted_min))
-
-                        if max_z:
-                            adjusted_max = float(max_z) + z_offset
-                            range_elem.set('max_z', str(adjusted_max))
-
-                    # Write the adjusted XML
-                    ranges_tree = ET.ElementTree(ranges_root)
-                    ET.indent(ranges_tree, space=' ')
-                    ranges_path = os.path.join(metadata_dir, 'layer_config_ranges.xml')
-                    ranges_tree.write(ranges_path, encoding='utf-8', xml_declaration=True)
-                    print("✅ Added layer_config_ranges.xml with adjusted Z values")
-                except Exception as e:
-                    print(f"⚠️  Could not process layer_config_ranges.xml: {e}")
-            else:
-                # Generate layer_config_ranges.xml from layer data (text injection mode)
-                try:
-                    ranges_root = ET.Element('ranges')
-
-                    # Create a range for each layer transition
-                    layers = color_data['layers']
-                    filament_colors = color_data.get('filament_colours', [])
-
-                    for i, layer_info in enumerate(layers):
-                        adjusted_z = layer_info['top_z'] + z_offset
-
-                        # Determine min_z (previous layer's max_z, or 0 for first layer)
-                        if i == 0:
-                            min_z = 0.0
-                        else:
-                            min_z = layers[i-1]['top_z'] + z_offset
-
-                        # Get extruder number (1-indexed)
-                        extruder_num = int(layer_info.get('extruder', i + 1))
-
-                        # Get color
-                        color = layer_info.get('color', '#808080')
-
-                        # Create range element
-                        range_elem = ET.SubElement(ranges_root, 'range')
-                        range_elem.set('minZ', f"{min_z:.6f}")
-                        range_elem.set('maxZ', f"{adjusted_z:.6f}")
-
-                        # Add filament settings
-                        filament_color_elem = ET.SubElement(range_elem, 'filament_colour')
-                        filament_color_elem.text = color
-
-                        extruder_elem = ET.SubElement(range_elem, 'extruder')
-                        extruder_elem.text = str(extruder_num)
-
-                    # Write the generated XML
-                    ranges_tree = ET.ElementTree(ranges_root)
-                    ET.indent(ranges_tree, space=' ')
-                    ranges_path = os.path.join(metadata_dir, 'layer_config_ranges.xml')
-                    ranges_tree.write(ranges_path, encoding='utf-8', xml_declaration=True)
-                    print("✅ Generated layer_config_ranges.xml from text layer data")
-                except Exception as e:
-                    print(f"⚠️  Could not generate layer_config_ranges.xml: {e}")
+            # NOTE: We do NOT create layer_config_ranges.xml here.
+            # That file is for print setting height modifiers (layer height, infill, etc.),
+            # NOT for color layers. Color layers are handled by custom_gcode_per_layer.xml
+            # which we create above. Working HueForge files don't have layer_config_ranges.xml.
 
             # Repack the 3MF
             temp_output = output_3mf_path + '.tmp'
