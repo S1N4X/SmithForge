@@ -301,6 +301,92 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
     except Exception as e:
         print(f"⚠️  Error injecting color metadata: {e}")
 
+
+def export_with_bambustudio_cli(mesh, output_path):
+    """
+    Export a mesh to Bambu Studio format using the Bambu Studio CLI.
+
+    This creates a proper Bambu Studio 3MF structure that is compatible with
+    color layer metadata injection.
+
+    Args:
+        mesh: trimesh.Trimesh object to export
+        output_path: Path where the final 3MF should be saved
+
+    Returns:
+        bool: True if export succeeded, False otherwise
+
+    Raises:
+        RuntimeError: If bambu-studio CLI is not available
+    """
+    import subprocess
+    import shutil
+
+    # Check if bambu-studio command exists
+    if not shutil.which('bambu-studio'):
+        raise RuntimeError(
+            "bambu-studio command not found. "
+            "Bambu Studio CLI is required for Bambu format exports. "
+            "Please ensure Bambu Studio is installed in the container."
+        )
+
+    # Create temporary input file (standard trimesh export)
+    temp_input = None
+    try:
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.3mf', delete=False) as tmp:
+            temp_input = tmp.name
+
+        print(f"📄 Creating temporary 3MF for Bambu Studio conversion: {temp_input}")
+        mesh.export(temp_input)
+
+        # Run Bambu Studio CLI to convert to proper Bambu format
+        # Just export without slicing to preserve geometry
+        cmd = [
+            'bambu-studio',
+            '--export-3mf', output_path,
+            temp_input
+        ]
+
+        print(f"🚀 Running Bambu Studio CLI: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120  # 2 minute timeout
+        )
+
+        if result.returncode != 0:
+            print(f"❌ Bambu Studio CLI failed with return code {result.returncode}")
+            if result.stdout:
+                print(f"   stdout: {result.stdout}")
+            if result.stderr:
+                print(f"   stderr: {result.stderr}")
+            return False
+
+        print("✅ Bambu Studio CLI export successful")
+        if result.stdout:
+            print(f"   Output: {result.stdout}")
+
+        return True
+
+    except subprocess.TimeoutExpired:
+        print("❌ Bambu Studio CLI timed out after 120 seconds")
+        return False
+    except Exception as e:
+        print(f"❌ Error during Bambu Studio CLI export: {e}")
+        return False
+    finally:
+        # Clean up temporary file
+        if temp_input and os.path.exists(temp_input):
+            try:
+                os.remove(temp_input)
+                print(f"🗑️  Cleaned up temporary file: {temp_input}")
+            except Exception as e:
+                print(f"⚠️  Could not remove temporary file {temp_input}: {e}")
+
+
 def sample_perimeter_height(mesh, num_samples=40):
     """
     Sample Z-heights along the perimeter of a mesh to detect the background height.
@@ -711,36 +797,28 @@ def modify_3mf(hueforge_path, base_path, output_path,
 
     # Choose export method based on output format
     if output_format == "bambu":
-        print("📦 Using Bambu Studio compatible export (lib3mf)")
+        print("📦 Using Bambu Studio CLI for proper Bambu format export")
         try:
-            from lib3mf_exporter import Lib3mfExporter
-            exporter = Lib3mfExporter()
-
-            # Export using lib3mf with color data
-            success = exporter.export_bambu_3mf(
-                final_mesh,
-                output_path,
-                color_data=color_data,
-                verbose=True
-            )
+            # Use Bambu Studio CLI to create proper Bambu 3MF structure
+            success = export_with_bambustudio_cli(final_mesh, output_path)
 
             if not success:
-                print("⚠️  lib3mf export failed, falling back to standard export")
-                final_mesh.export(output_path)
-                # Still inject color metadata below if needed
-            else:
-                # lib3mf export successful
-                print("✅ Bambu-compatible 3MF exported successfully")
-                if not color_data:
-                    # No color data, safe to exit
-                    print("✅ Done! Rotation, user shift, scaling, centering, clipping, embedding, and union complete.")
-                    return
-                # Has color data - continue to inject_color_metadata below for XML files
-                print("📝 Proceeding to inject color metadata XML files...")
+                # CLI export failed - this is a fatal error for Bambu format
+                raise RuntimeError(
+                    "Bambu Studio CLI export failed. "
+                    "Cannot create proper Bambu format without CLI. "
+                    "Please check Bambu Studio installation and logs above."
+                )
 
-        except ImportError:
-            print("⚠️  lib3mf_exporter module not found, falling back to standard export")
-            final_mesh.export(output_path)
+            print("✅ Bambu Studio CLI export successful")
+            # Continue to inject color metadata below if color_data exists
+
+        except RuntimeError as e:
+            # Re-raise RuntimeError (from export_with_bambustudio_cli or above)
+            raise e
+        except Exception as e:
+            # Unexpected error
+            raise RuntimeError(f"Unexpected error during Bambu export: {e}")
     else:
         # Standard trimesh export
         print("📦 Using standard 3MF export (trimesh)")
