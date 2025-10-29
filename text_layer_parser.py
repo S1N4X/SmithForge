@@ -265,14 +265,10 @@ def parse_swap_instructions(text: str) -> Optional[Dict]:
             # Match "Start with <color>"
             start_match = re.match(r'Start\s+with\s+(.+)', line, re.IGNORECASE)
             if start_match:
-                color_name = start_match.group(1).strip()
-                # First layer starts at 0mm (will be adjusted later)
-                layers.append({
-                    'top_z': 0.0,
-                    'extruder': str(current_extruder),
-                    'color': color_name_to_hex(color_name)
-                })
-                current_extruder += 1
+                # Don't create a layer entry for the starting color
+                # Extruder 1 (base color) is implicit in Bambu Studio
+                # Layer entries are only for swaps (extruder 2+)
+                current_extruder = 2  # First swap will be extruder 2
                 continue
 
             # Match "At layer #N (X.XXmm) swap to <color>"

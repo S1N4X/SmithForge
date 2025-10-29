@@ -216,6 +216,110 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
         print(f"⚠️  Error injecting color metadata: {e}")
 
 
+def fix_build_plate_transform(output_3mf_path):
+    """
+    Fix the build plate transform in a Bambu 3MF to center the object.
+
+    After Bambu CLI export, the build transform may place objects off the build plate.
+    This function corrects it to center the object on a 256x256mm build plate.
+
+    Args:
+        output_3mf_path: Path to the 3MF file to modify
+    """
+    try:
+        import xml.etree.ElementTree as ET
+
+        # Create a temporary directory to work with the 3MF contents
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Extract the 3MF
+            with zipfile.ZipFile(output_3mf_path, 'r') as zf:
+                zf.extractall(temp_dir)
+
+            # Parse object model to get vertex bounds
+            object_model_path = os.path.join(temp_dir, '3D', 'Objects', 'object_1.model')
+
+            if not os.path.exists(object_model_path):
+                print("⚠️  Warning: Could not find 3D/Objects/object_1.model, skipping transform fix")
+                return
+
+            # Parse the object XML to find vertex Z bounds
+            tree = ET.parse(object_model_path)
+            root = tree.getroot()
+
+            # Find all vertices
+            ns = {'': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'}
+            vertices = root.findall('.//vertices/vertex', ns)
+
+            if not vertices:
+                # Try without namespace
+                vertices = root.findall('.//vertices/vertex')
+
+            if not vertices:
+                print("⚠️  Warning: Could not find vertices in object model")
+                return
+
+            # Calculate Z bounds
+            z_values = []
+            for vertex in vertices:
+                z = float(vertex.get('z', 0))
+                z_values.append(z)
+
+            z_min = min(z_values)
+            print(f"📐 Object Z bounds: min={z_min:.3f}")
+
+            # Parse main 3D model to update build transform
+            model_path = os.path.join(temp_dir, '3D', '3dmodel.model')
+
+            if not os.path.exists(model_path):
+                print("⚠️  Warning: Could not find 3D/3dmodel.model, skipping transform fix")
+                return
+
+            tree = ET.parse(model_path)
+            root = tree.getroot()
+
+            # Find build item element
+            build_items = root.findall('.//build/item', ns)
+            if not build_items:
+                # Try without namespace
+                build_items = root.findall('.//build/item')
+
+            if not build_items:
+                print("⚠️  Warning: Could not find build item in 3dmodel.model")
+                return
+
+            # Update transform for the first item (should be only one)
+            item = build_items[0]
+
+            # Calculate correct transform for 256x256mm build plate
+            # Center at (128, 128), bottom at Z=0
+            z_offset = -z_min  # Move bottom to Z=0
+            new_transform = f"1 0 0 0 1 0 0 0 1 128 128 {z_offset}"
+
+            item.set('transform', new_transform)
+            print(f"🎯 Fixed build plate transform: (128, 128, {z_offset:.3f})")
+
+            # Write back the modified XML
+            tree.write(model_path, encoding='utf-8', xml_declaration=True)
+
+            # Repack the 3MF
+            temp_output = output_3mf_path + '.tmp'
+            with zipfile.ZipFile(temp_output, 'w', zipfile.ZIP_DEFLATED) as zf_out:
+                for root_dir, dirs, files in os.walk(temp_dir):
+                    for file in files:
+                        file_path = os.path.join(root_dir, file)
+                        arcname = os.path.relpath(file_path, temp_dir)
+                        zf_out.write(file_path, arcname)
+
+            # Replace original with modified
+            shutil.move(temp_output, output_3mf_path)
+            print(f"✅ Build plate transform fixed")
+
+    except Exception as e:
+        print(f"⚠️  Error fixing build plate transform: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def export_with_bambustudio_cli(mesh, output_path):
     """
     Export a mesh to Bambu Studio format using the Bambu Studio CLI.
@@ -713,6 +817,18 @@ def modify_3mf(hueforge_path, base_path, output_path,
     if output_format == "bambu":
         print("📦 Using Bambu Studio CLI for proper Bambu format export")
         try:
+            # Center the mesh at origin (0,0,0) for proper build plate positioning
+            # This ensures the model appears centered on the build plate in Bambu Studio
+            bounds = final_mesh.bounds
+            center_x = (bounds[0][0] + bounds[1][0]) / 2.0
+            center_y = (bounds[0][1] + bounds[1][1]) / 2.0
+            z_min = bounds[0][2]  # Bottom of mesh
+
+            # Translate to center XY at origin, Z at zero (bottom on build plate)
+            final_mesh.apply_translation([-center_x, -center_y, -z_min])
+            print(f"🎯 Centered mesh at origin for build plate positioning")
+            print(f"   Translation applied: X={-center_x:.3f}, Y={-center_y:.3f}, Z={-z_min:.3f}")
+
             # Use Bambu Studio CLI to create proper Bambu 3MF structure
             success = export_with_bambustudio_cli(final_mesh, output_path)
 
@@ -725,6 +841,10 @@ def modify_3mf(hueforge_path, base_path, output_path,
                 )
 
             print("✅ Bambu Studio CLI export successful")
+
+            # Fix build plate transform to center object on build plate
+            fix_build_plate_transform(output_path)
+
             # Continue to inject color metadata below if color_data exists
 
         except RuntimeError as e:
