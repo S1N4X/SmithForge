@@ -128,9 +128,62 @@ def extract_color_layers(hueforge_3mf_path):
         print(f"⚠️  Error extracting color layers: {e}")
         return None
 
+def detect_object_id(temp_dir):
+    """
+    Detect the object ID from the 3D model structure.
+
+    Looks for object_X.model files in 3D/Objects/ directory and returns
+    the first object ID found, or defaults to 1.
+
+    Args:
+        temp_dir: Path to extracted 3MF temporary directory
+
+    Returns:
+        int: Object ID (typically 1 for single-object models)
+    """
+    try:
+        # Check 3D/Objects/ directory for object files
+        objects_dir = os.path.join(temp_dir, '3D', 'Objects')
+        if os.path.exists(objects_dir):
+            # Find object_X.model files
+            for filename in os.listdir(objects_dir):
+                if filename.startswith('object_') and filename.endswith('.model'):
+                    # Extract ID from filename (e.g., "object_1.model" -> 1)
+                    try:
+                        obj_id = int(filename.replace('object_', '').replace('.model', ''))
+                        return obj_id
+                    except ValueError:
+                        continue
+
+        # If no object files found, check 3dmodel.model for object definitions
+        model_path = os.path.join(temp_dir, '3D', '3dmodel.model')
+        if os.path.exists(model_path):
+            tree = ET.parse(model_path)
+            root = tree.getroot()
+
+            # Look for object elements with id attribute
+            ns = {'': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'}
+            objects = root.findall('.//object[@id]', ns)
+            if not objects:
+                objects = root.findall('.//object[@id]')
+
+            if objects:
+                # Return the first object ID found
+                return int(objects[0].get('id', 1))
+
+    except Exception as e:
+        print(f"⚠️  Error detecting object ID: {e}")
+
+    # Default to 1 if detection fails
+    return 1
+
+
 def inject_color_metadata(output_3mf_path, color_data, z_offset):
     """
-    Inject color layer metadata into an exported 3MF file.
+    Inject color layer metadata into an exported 3MF file using height range modifiers.
+
+    This approach defines extruder assignments for Z-height ranges on the object,
+    which is the preferred method for un-sliced models in Bambu Studio.
 
     Args:
         output_3mf_path: Path to the 3MF file to modify
@@ -148,28 +201,55 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
             metadata_dir = os.path.join(temp_dir, 'Metadata')
             os.makedirs(metadata_dir, exist_ok=True)
 
-            # Create custom_gcode_per_layer.xml with adjusted Z heights
-            custom_gcode_xml = ET.Element('custom_gcodes_per_layer')
-            plate = ET.SubElement(custom_gcode_xml, 'plate')
-            ET.SubElement(plate, 'plate_info', id='1')
+            # Detect object ID from 3D model structure
+            object_id = detect_object_id(temp_dir)
+            print(f"📍 Detected object ID: {object_id}")
 
-            for layer_info in color_data['layers']:
+            # Create layer_config_ranges.xml with height range modifiers
+            # This approach defines extruder assignments for Z-height ranges on the object
+            # This is the preferred method for un-sliced models in Bambu Studio
+            # IMPORTANT: Only define ranges for color SWAPS (extruders 2+)
+            # Base color (extruder 1) is implicit and should NOT be included
+            ranges_xml = ET.Element('objects')
+            obj = ET.SubElement(ranges_xml, 'object', id=str(object_id))
+
+            # Calculate height ranges from color layer data
+            # Each range defines where a color swap occurs (extruders 2, 3, 4, etc.)
+            # Range 1: first swap (extruder 2) from 0.0 to first swap Z
+            # Range 2: second swap (extruder 3) from first swap Z to second swap Z
+            # Range 3: third swap (extruder 4) from second swap Z to third swap Z
+            # etc.
+
+            # Add ranges for each color swap (extruders 2+)
+            for i, layer_info in enumerate(color_data['layers']):
                 adjusted_z = layer_info['top_z'] + z_offset
-                ET.SubElement(plate, 'layer',
-                            top_z=f"{adjusted_z:.17g}",
-                            type='2',
-                            extruder=layer_info['extruder'],
-                            color=layer_info['color'],
-                            extra='',
-                            gcode='tool_change')
 
-            ET.SubElement(plate, 'mode', value='MultiAsSingle')
+                # Determine min_z for this range
+                if i == 0:
+                    min_z = 0.0  # First swap starts at bottom
+                else:
+                    min_z = color_data['layers'][i - 1]['top_z'] + z_offset
+
+                # Determine max_z for this range
+                if i + 1 < len(color_data['layers']):
+                    # Not the last layer: range goes to next swap Z
+                    max_z = color_data['layers'][i + 1]['top_z'] + z_offset
+                else:
+                    # Last layer: range goes to infinity (large value)
+                    max_z = adjusted_z + 1000.0
+
+                range_elem = ET.SubElement(obj, 'range',
+                                          min_z=f"{min_z:.17g}",
+                                          max_z=f"{max_z:.17g}")
+                ET.SubElement(range_elem, 'option', opt_key='extruder').text = layer_info['extruder']
+                ET.SubElement(range_elem, 'option', opt_key='layer_height').text = '0.08'
 
             # Write the XML file
-            tree = ET.ElementTree(custom_gcode_xml)
-            ET.indent(tree, space='')
-            custom_gcode_path = os.path.join(metadata_dir, 'custom_gcode_per_layer.xml')
-            tree.write(custom_gcode_path, encoding='utf-8', xml_declaration=True)
+            tree = ET.ElementTree(ranges_xml)
+            ET.indent(tree, space=' ')
+            ranges_path = os.path.join(metadata_dir, 'layer_config_ranges.xml')
+            tree.write(ranges_path, encoding='utf-8', xml_declaration=True)
+            print(f"✅ Created layer_config_ranges.xml with {len(color_data['layers'])} color swap ranges (extruders 2+)")
 
             # Update or create project_settings.config with filament colors
             project_settings_path = os.path.join(metadata_dir, 'project_settings.config')
@@ -183,21 +263,57 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
 
             # Inject filament colors
             if color_data['filament_colours']:
+                num_filaments = len(color_data['filament_colours'])
                 config['filament_colour'] = color_data['filament_colours']
-                config['filament_type'] = ['PLA'] * len(color_data['filament_colours'])
+                config['filament_type'] = ['PLA'] * num_filaments
+                config['default_filament_colour'] = [''] * num_filaments  # Match array length for Bambu Studio
+
+                # Add complete filament properties required by Bambu Studio
+                config['filament_ids'] = ['GFA00'] * num_filaments
+                config['filament_settings_id'] = ['Bambu PLA Basic @BBL X1C'] * num_filaments
+                config['filament_cost'] = ['24.99'] * num_filaments
+                config['filament_density'] = ['1.26'] * num_filaments
+
+                # CRITICAL: Enable multi-material printing mode
+                # Without these flags, Bambu Studio won't show color layer changes
+                config['enable_prime_tower'] = '1'
+                config['single_extruder_multi_material'] = '1'
 
             # Write back
             with open(project_settings_path, 'w') as f:
                 json.dump(config, f, indent=4)
 
+            # CRITICAL: We MUST overwrite model_settings.config because Bambu CLI creates
+            # an EMPTY <assemble> section, causing "assemble objects, size 0" error
+            print("📝 Creating model_settings.config with proper assemble section...")
+            model_settings_xml = create_model_settings_config(temp_dir)
+            model_settings_path = os.path.join(metadata_dir, 'model_settings.config')
+            with open(model_settings_path, 'w', encoding='utf-8') as f:
+                f.write(model_settings_xml)
+            print("✅ model_settings.config created")
+
+            # Create Metadata/_rels/model_settings.config.rels (required for assembly)
+            metadata_rels_dir = os.path.join(metadata_dir, '_rels')
+            os.makedirs(metadata_rels_dir, exist_ok=True)
+
+            # This .rels file is required for Bambu Studio to properly load objects for assembly
+            rels_content = '''<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>
+'''
+            rels_path = os.path.join(metadata_rels_dir, 'model_settings.config.rels')
+            with open(rels_path, 'w', encoding='utf-8') as f:
+                f.write(rels_content)
+            print("✅ model_settings.config.rels created")
+
             # NOTE: We do NOT create slice_info.config here because Bambu Studio CLI
             # already creates it with the correct version. Overwriting it would
             # downgrade the version and potentially break compatibility.
 
-            # NOTE: We do NOT create layer_config_ranges.xml here.
-            # That file is for print setting height modifiers (layer height, infill, etc.),
-            # NOT for color layers. Color layers are handled by custom_gcode_per_layer.xml
-            # which we create above. Working HueForge files don't have layer_config_ranges.xml.
+            # NOTE: We use layer_config_ranges.xml for color definition via height range
+            # modifiers. This is the preferred approach for un-sliced models in Bambu Studio
+            # as it allows the slicer to apply extruder assignments per Z-height range.
+            # This is more flexible than custom_gcode_per_layer.xml (gcode tool changes).
 
             # Repack the 3MF
             temp_output = output_3mf_path + '.tmp'
@@ -214,6 +330,151 @@ def inject_color_metadata(output_3mf_path, color_data, z_offset):
 
     except Exception as e:
         print(f"⚠️  Error injecting color metadata: {e}")
+
+
+def create_model_settings_config(temp_dir):
+    """
+    Create model_settings.config XML file for Bambu Studio.
+
+    This file is required for proper color layer preview in Bambu Studio.
+    It defines the object/plate/assemble relationship.
+
+    Args:
+        temp_dir: Path to extracted 3MF temporary directory
+
+    Returns:
+        XML string content for model_settings.config
+    """
+    try:
+        # Extract transform from 3dmodel.model build item
+        model_path = os.path.join(temp_dir, '3D', '3dmodel.model')
+        if not os.path.exists(model_path):
+            print("⚠️  Warning: 3D/3dmodel.model not found, using default transform")
+            transform = "1 0 0 0 1 0 0 0 1 128 128 0"
+        else:
+            tree = ET.parse(model_path)
+            root = tree.getroot()
+
+            # Find build item - try with namespace first, then without
+            ns = {'': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'}
+            build_items = root.findall('.//build/item', ns)
+            if not build_items:
+                build_items = root.findall('.//build/item')
+
+            if build_items:
+                transform = build_items[0].get('transform', '1 0 0 0 1 0 0 0 1 128 128 0')
+            else:
+                print("⚠️  Warning: Build item not found, using default transform")
+                transform = "1 0 0 0 1 0 0 0 1 128 128 0"
+
+        # Extract face count from object_1.model
+        object_path = os.path.join(temp_dir, '3D', 'Objects', 'object_1.model')
+        face_count = 0
+        if os.path.exists(object_path):
+            obj_tree = ET.parse(object_path)
+            obj_root = obj_tree.getroot()
+
+            # Find triangles element
+            triangles = obj_root.findall('.//{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}triangles')
+            if not triangles:
+                triangles = obj_root.findall('.//triangles')
+
+            if triangles:
+                # Count triangle elements
+                for tri_elem in triangles:
+                    face_count += len(tri_elem.findall('.//{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}triangle'))
+                    if face_count == 0:  # Try without namespace
+                        face_count += len(tri_elem.findall('.//triangle'))
+
+        # Build the XML structure
+        config = ET.Element('config')
+
+        # Object section
+        obj = ET.SubElement(config, 'object', id='2')
+        ET.SubElement(obj, 'metadata', key='name', value='SmithForge')
+        ET.SubElement(obj, 'metadata', key='extruder', value='1')
+        if face_count > 0:
+            ET.SubElement(obj, 'metadata', face_count=str(face_count))
+
+        part = ET.SubElement(obj, 'part', id='1', subtype='normal_part')
+        ET.SubElement(part, 'metadata', key='name', value='SmithForge')
+        ET.SubElement(part, 'metadata', key='matrix', value='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1')
+        ET.SubElement(part, 'metadata', key='source_file', value='SmithForge/combined_model.3mf')
+        ET.SubElement(part, 'metadata', key='source_object_id', value='0')
+        ET.SubElement(part, 'metadata', key='source_volume_id', value='0')
+        ET.SubElement(part, 'metadata', key='source_offset_x', value='0')
+        ET.SubElement(part, 'metadata', key='source_offset_y', value='0')
+        ET.SubElement(part, 'metadata', key='source_offset_z', value='0')
+        if face_count > 0:
+            ET.SubElement(part, 'mesh_stat',
+                         face_count=str(face_count),
+                         edges_fixed='0',
+                         degenerate_facets='0',
+                         facets_removed='0',
+                         facets_reversed='0',
+                         backwards_edges='0')
+
+        # Plate section
+        plate = ET.SubElement(config, 'plate')
+        ET.SubElement(plate, 'metadata', key='plater_id', value='1')
+        ET.SubElement(plate, 'metadata', key='plater_name', value='')
+        ET.SubElement(plate, 'metadata', key='locked', value='false')
+
+        model_instance = ET.SubElement(plate, 'model_instance')
+        ET.SubElement(model_instance, 'metadata', key='object_id', value='2')
+        ET.SubElement(model_instance, 'metadata', key='instance_id', value='0')
+        ET.SubElement(model_instance, 'metadata', key='identify_id', value='2')
+
+        # Assemble section
+        assemble = ET.SubElement(config, 'assemble')
+        ET.SubElement(assemble, 'assemble_item',
+                     object_id='2',
+                     instance_id='0',
+                     transform=transform,
+                     offset='0 0 0')
+
+        # Convert to string
+        tree = ET.ElementTree(config)
+        ET.indent(tree, space='  ')
+
+        # Return as string
+        import io
+        output = io.BytesIO()
+        tree.write(output, encoding='utf-8', xml_declaration=True)
+        return output.getvalue().decode('utf-8')
+
+    except Exception as e:
+        print(f"⚠️  Error creating model_settings.config: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Return minimal valid config as fallback
+        return '''<?xml version='1.0' encoding='utf-8'?>
+<config>
+  <object id="2">
+    <metadata key="extruder" value="1"/>
+    <part id="1" subtype="normal_part">
+      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="0"/>
+      <metadata key="source_offset_x" value="0"/>
+      <metadata key="source_offset_y" value="0"/>
+      <metadata key="source_offset_z" value="0"/>
+    </part>
+  </object>
+  <plate>
+    <metadata key="plater_id" value="1"/>
+    <model_instance>
+      <metadata key="object_id" value="2"/>
+      <metadata key="instance_id" value="0"/>
+      <metadata key="identify_id" value="2"/>
+    </model_instance>
+  </plate>
+  <assemble>
+    <assemble_item object_id="2" instance_id="0" transform="1 0 0 0 1 0 0 0 1 128 128 0" offset="0 0 0"/>
+  </assemble>
+</config>
+'''
 
 
 def fix_build_plate_transform(output_3mf_path):
@@ -316,6 +577,103 @@ def fix_build_plate_transform(output_3mf_path):
 
     except Exception as e:
         print(f"⚠️  Error fixing build plate transform: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def fix_namespace_declarations(output_3mf_path):
+    """
+    Fix namespace declaration mismatch in Bambu CLI exported 3MF files.
+
+    Problem: Bambu CLI creates files with:
+    - xmlns:ns1="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+    - Uses ns1:path, ns1:UUID, etc.
+    - But declares requiredextensions="p" (without xmlns:p declaration)
+
+    This causes Bambu Studio to reject the file as invalid.
+
+    Solution: Replace ns1: prefix with p: and add proper xmlns:p declaration.
+
+    Args:
+        output_3mf_path: Path to the 3MF file to modify
+    """
+    try:
+        import xml.etree.ElementTree as ET
+        import re
+
+        print("🔧 Fixing namespace declarations...")
+
+        # Create a temporary directory to work with the 3MF contents
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Extract the 3MF
+            with zipfile.ZipFile(output_3mf_path, 'r') as zf:
+                zf.extractall(temp_dir)
+
+            # Fix 3D/3dmodel.model
+            model_path = os.path.join(temp_dir, '3D', '3dmodel.model')
+
+            if not os.path.exists(model_path):
+                print("⚠️  Warning: Could not find 3D/3dmodel.model, skipping namespace fix")
+                return
+
+            # Read the XML file as text for easier namespace replacement
+            with open(model_path, 'r', encoding='utf-8') as f:
+                xml_content = f.read()
+
+            # Check if we have the ns1 namespace issue
+            if 'xmlns:ns1=' in xml_content and 'requiredextensions="p"' in xml_content:
+                # Replace xmlns:ns1 with xmlns:p
+                xml_content = xml_content.replace(
+                    'xmlns:ns1="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"',
+                    'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"'
+                )
+
+                # Replace all ns1: attribute prefixes with p:
+                xml_content = re.sub(r'\bns1:', 'p:', xml_content)
+
+                print("✅ Fixed namespace: ns1: → p:")
+
+            # CRITICAL: Add BambuStudio namespace to prevent "other vendor" detection
+            if 'xmlns:BambuStudio=' not in xml_content:
+                # Find the model root element and add BambuStudio namespace
+                xml_content = xml_content.replace(
+                    'requiredextensions="p"',
+                    'requiredextensions="p" xmlns:BambuStudio="http://schemas.bambulab.com/package/2021"'
+                )
+                print("✅ Added BambuStudio namespace")
+
+            # CRITICAL FIX: Replace ns0: prefix with default namespace (no prefix)
+            # Bambu Studio expects <model xmlns=...> not <ns0:model xmlns:ns0=...>
+            if 'xmlns:ns0=' in xml_content and '<ns0:model' in xml_content:
+                # Replace prefixed namespace with default namespace
+                xml_content = xml_content.replace(
+                    'xmlns:ns0="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"',
+                    'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"'
+                )
+                # Remove all ns0: prefixes from elements
+                xml_content = re.sub(r'<ns0:', '<', xml_content)
+                xml_content = re.sub(r'</ns0:', '</', xml_content)
+                print("✅ Converted ns0: prefix to default namespace")
+
+            # Write back the fixed XML
+            with open(model_path, 'w', encoding='utf-8') as f:
+                f.write(xml_content)
+
+            # Repack the 3MF
+            temp_output = output_3mf_path + '.tmp'
+            with zipfile.ZipFile(temp_output, 'w', zipfile.ZIP_DEFLATED) as zf_out:
+                for root_dir, dirs, files in os.walk(temp_dir):
+                    for file in files:
+                        file_path = os.path.join(root_dir, file)
+                        arcname = os.path.relpath(file_path, temp_dir)
+                        zf_out.write(file_path, arcname)
+
+            # Replace original with modified
+            shutil.move(temp_output, output_3mf_path)
+            print("✅ Namespace declarations fixed")
+
+    except Exception as e:
+        print(f"⚠️  Error fixing namespace declarations: {e}")
         import traceback
         traceback.print_exc()
 
@@ -637,7 +995,15 @@ def modify_3mf(hueforge_path, base_path, output_path,
             return
 
         print("🎨 Parsing color layer information from text...")
-        color_data = parse_swap_instructions(inject_colors_text)
+        # Read the text file content
+        try:
+            with open(inject_colors_text, 'r') as f:
+                text_content = f.read()
+        except Exception as e:
+            print(f"❌ Error reading text file: {e}")
+            return
+
+        color_data = parse_swap_instructions(text_content)
         if color_data is None:
             print("❌ Error: Failed to parse swap instructions text")
             return
@@ -844,6 +1210,10 @@ def modify_3mf(hueforge_path, base_path, output_path,
 
             # Fix build plate transform to center object on build plate
             fix_build_plate_transform(output_path)
+
+            # Fix namespace declaration mismatch (ns1 → p)
+            # Must run AFTER build plate transform because ElementTree may re-add ns1 namespace
+            fix_namespace_declarations(output_path)
 
             # Continue to inject color metadata below if color_data exists
 
